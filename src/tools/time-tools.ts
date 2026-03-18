@@ -56,7 +56,10 @@ function formatEntryTime(timestamp: number): string {
 }
 
 export function registerTimeToolsRead(server: McpServer) {
-  server.tool(
+  // Workaround: SDK 1.27+ dual Zod v3/v4 type causes TS2589 on server.tool() generics
+  const tool: (...args: any[]) => any = server.tool.bind(server);
+
+  tool(
     "getTimeEntries",
     "Gets time entries for a specific task or all user's time entries. Returns last 30 days by default if no dates specified.",
     {
@@ -70,7 +73,7 @@ export function registerTimeToolsRead(server: McpServer) {
     {
       readOnlyHint: true
     },
-    async ({ task_id, start_date, end_date, list_id, space_id, include_all_users }) => {
+    async ({ task_id, start_date, end_date, list_id, space_id, include_all_users }: any) => {
       try {
         // Build query parameters
         const params = new URLSearchParams();
@@ -321,7 +324,10 @@ function processTimeEntriesData(data: any, task_id?: string, start_date?: string
 }
 
 export function registerTimeToolsWrite(server: McpServer) {
-  server.tool(
+  // Workaround: SDK 1.27+ dual Zod v3/v4 type causes TS2589 on server.tool() generics
+  const tool: (...args: any[]) => any = server.tool.bind(server);
+
+  tool(
     "createTimeEntry",
     [
       "Creates a time entry (books time) on a task for the current user.",
@@ -340,7 +346,7 @@ export function registerTimeToolsWrite(server: McpServer) {
       destructiveHint: false,
       idempotentHint: false,
     },
-    async ({ task_id, hours, description, start_time }) => {
+    async ({ task_id, hours, description, start_time }: any) => {
       try {
         // Convert hours to milliseconds (ClickUp API uses milliseconds)
         const durationMs = Math.round(hours * 60 * 60 * 1000);

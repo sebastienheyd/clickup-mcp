@@ -7,6 +7,9 @@ import {generateTaskMetadata} from "./task-tools";
 const MAX_SEARCH_RESULTS = 50;
 
 export function registerSearchTools(server: McpServer, userData: any) {
+  // Workaround: SDK 1.27+ dual Zod v3/v4 type causes TS2589 on server.tool() generics
+  const tool: (...args: any[]) => any = server.tool.bind(server);
+
   // Dynamically construct the searchTasks description
   const searchTasksDescriptionBase = [
     "Searches tasks (sometimes called Tickets or Cards) by name, content, assignees, and ID with fuzzy matching and support for multiple search terms (OR logic).",
@@ -22,7 +25,7 @@ export function registerSearchTools(server: McpServer, userData: any) {
   searchTasksDescriptionBase.push("You'll get a rough overview of the tasks that match the search terms, sorted by relevance.");
   searchTasksDescriptionBase.push("Always use getTaskById to get more specific information if a task is relevant, and always share the task URL.");
 
-  server.tool(
+  tool(
     "searchTasks",
     searchTasksDescriptionBase.join("\n"),
     {
@@ -56,7 +59,7 @@ export function registerSearchTools(server: McpServer, userData: any) {
     {
       readOnlyHint: true
     },
-    async ({terms, list_ids, space_ids, only_todo, status, assigned_to_me}) => {
+    async ({terms, list_ids, space_ids, only_todo, status, assigned_to_me}: any) => {
       // Get current user ID if filtering by assigned_to_me
       const assignees = assigned_to_me ? [userData.user.id as string] : [];
 
@@ -78,7 +81,7 @@ export function registerSearchTools(server: McpServer, userData: any) {
 
         // Apply status filtering
         if (status && status.length > 0) {
-          const statusLower = status.map(s => s.toLowerCase());
+          const statusLower = status.map((s: string) => s.toLowerCase());
           allTasks = allTasks.filter((task: any) => statusLower.includes(task.status.status.toLowerCase()));
         } else if (only_todo) {
           allTasks = allTasks.filter((task: any) => task.status.type !== "done" && task.status.type !== "closed");
@@ -119,11 +122,11 @@ export function registerSearchTools(server: McpServer, userData: any) {
       });
 
       // Task ID Fallback Logic (internal IDs and custom IDs)
-      const potentialTaskIds = terms.filter(isTaskId);
-      const potentialCustomIds = terms.filter(id => isCustomTaskId(id) && !isTaskId(id));
+      const potentialTaskIds = terms.filter((id: string) => isTaskId(id));
+      const potentialCustomIds = terms.filter((id: string) => isCustomTaskId(id) && !isTaskId(id));
       const foundTaskIdsByFuse = new Set(Array.from(uniqueResults.keys()).map(id => id.toLowerCase()));
 
-      const taskIdsToFetchDirectly = potentialTaskIds.filter(id => {
+      const taskIdsToFetchDirectly = potentialTaskIds.filter((id: string) => {
         const lowerId = id.toLowerCase();
         return !foundTaskIdsByFuse.has(lowerId);
       });
@@ -131,7 +134,7 @@ export function registerSearchTools(server: McpServer, userData: any) {
       // Fetch internal task IDs not found in index
       if (taskIdsToFetchDirectly.length > 0) {
         console.error(`Attempting direct fetch for task IDs: ${taskIdsToFetchDirectly.join(', ')}`);
-        const directFetchPromises = taskIdsToFetchDirectly.map(async (id) => {
+        const directFetchPromises = taskIdsToFetchDirectly.map(async (id: string) => {
           try {
             const response = await fetch(
               `https://api.clickup.com/api/v2/task/${id}`,
@@ -159,7 +162,7 @@ export function registerSearchTools(server: McpServer, userData: any) {
       // Fetch custom task IDs via the custom_task_ids API parameter
       if (potentialCustomIds.length > 0) {
         console.error(`Attempting direct fetch for custom task IDs: ${potentialCustomIds.join(', ')}`);
-        const customFetchPromises = potentialCustomIds.map(async (customId) => {
+        const customFetchPromises = potentialCustomIds.map(async (customId: string) => {
           try {
             const response = await fetch(
               `https://api.clickup.com/api/v2/task/${customId}?custom_task_ids=true&team_id=${CONFIG.teamId}`,
@@ -190,7 +193,7 @@ export function registerSearchTools(server: McpServer, userData: any) {
 
       // Apply status filtering
       if (status && status.length > 0) {
-        const statusLower = status.map(s => s.toLowerCase());
+        const statusLower = status.map((s: string) => s.toLowerCase());
         resultTasks = resultTasks.filter((task: any) => statusLower.includes(task.status.status.toLowerCase()));
       } else if (only_todo) {
         resultTasks = resultTasks.filter((task: any) => task.status.type !== "done" && task.status.type !== "closed");

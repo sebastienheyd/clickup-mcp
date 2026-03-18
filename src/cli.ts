@@ -97,9 +97,9 @@ async function main() {
     const tools = server._registeredTools as Record<string, {
       description: string;
       inputSchema: z.ZodObject<any>;
-      callback: (params: any) => Promise<any>;
+      handler: (params: any) => Promise<any>;
     }>;
-    
+
     if (tools) {
       for (const [name, tool] of Object.entries(tools)) {
         console.error(`  - ${name}: ${tool.description}`);
@@ -153,9 +153,9 @@ async function main() {
     const tools = server._registeredTools as Record<string, {
       description: string;
       inputSchema: z.ZodObject<any>;
-      callback: (params: any) => Promise<any>;
+      handler: (params: any) => Promise<any>;
     }>;
-    
+
     if (!tools || !tools[toolName]) {
       console.error(`Unknown tool: ${toolName}`);
       process.exit(1);
@@ -186,7 +186,7 @@ async function main() {
     }
     
     // Call the tool's callback function
-    const result = await tool.callback(params);
+    const result = await tool.handler(params);
     console.dir(result.content);
     process.exit(0);
   } catch (error: unknown) {

@@ -13,7 +13,10 @@ const taskTimeEstimateSchema = z.number().optional().describe("Optional time est
 const taskTagsSchema = z.array(z.string()).optional().describe("Optional array of tag names");
 
 export function registerTaskToolsWrite(server: McpServer, userData: any) {
-  server.tool(
+  // Workaround: SDK 1.27+ dual Zod v3/v4 type causes TS2589 on server.tool() generics
+  const tool: (...args: any[]) => any = server.tool.bind(server);
+
+  tool(
     "addComment",
     (() => {
       const descriptionBase = [
@@ -45,7 +48,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
       destructiveHint: false,
       idempotentHint: false,
     },
-    async ({ task_id, comment }) => {
+    async ({ task_id, comment }: any) => {
       try {
         // Resolve custom task ID to internal ID if needed
         const resolved_task_id = await resolveTaskId(task_id);
@@ -104,7 +107,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
     }
   );
 
-  server.tool(
+  tool(
     "updateTask",
     (() => {
       const descriptionBase = [
@@ -150,7 +153,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
       idempotentHint: false,
       openWorldHint: true
     },
-    async ({ task_id, name, append_description, status, priority, due_date, start_date, time_estimate, tags, parent_task_id, assignees, blocking, waiting_on, linked_tasks }) => {
+    async ({ task_id, name, append_description, status, priority, due_date, start_date, time_estimate, tags, parent_task_id, assignees, blocking, waiting_on, linked_tasks }: any) => {
       try {
         // Resolve custom task ID to internal ID if needed
         const resolved_task_id = await resolveTaskId(task_id);
@@ -184,7 +187,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
         if (tags !== undefined) {
           // Get current tags
           const currentTags = taskData.tags?.map((t: any) => t.name) || [];
-          const tagsToAdd = tags.filter(tag => !currentTags.includes(tag));
+          const tagsToAdd = tags.filter((tag: string) => !currentTags.includes(tag));
           const tagsToRemove = currentTags.filter((tag: string) => !tags.includes(tag));
 
           // Add new tags
@@ -331,7 +334,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
     }
   );
 
-  server.tool(
+  tool(
     "createTask",
     (() => {
       const descriptionBase = [
@@ -372,7 +375,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
       idempotentHint: false,
       openWorldHint: true
     },
-    async ({ list_id, name, description, status, priority, due_date, start_date, time_estimate, tags, parent_task_id, assignees }) => {
+    async ({ list_id, name, description, status, priority, due_date, start_date, time_estimate, tags, parent_task_id, assignees }: any) => {
       try {
         const userData = await getCurrentUser();
         const currentUserId = userData.user.id;

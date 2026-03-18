@@ -22,7 +22,7 @@ export class ToolTester {
     const tools = this.server._registeredTools as Record<string, {
       description: string;
       inputSchema: any;
-      callback: (params: any) => Promise<CallToolResult>;
+      handler: (params: any) => Promise<CallToolResult>;
     }>;
     
     if (!tools || !tools[toolName]) {
@@ -39,7 +39,7 @@ export class ToolTester {
     }
 
     // Call the tool's callback directly with the provided parameters
-    return await tool.callback(params);
+    return await tool.handler(params);
   }
 }
 

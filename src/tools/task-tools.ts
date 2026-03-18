@@ -9,7 +9,10 @@ import { downloadImages } from "../shared/image-processing";
 // Read-specific utility functions
 
 export function registerTaskToolsRead(server: McpServer, userData: any) {
-  server.tool(
+  // Workaround: SDK 1.27+ dual Zod v3/v4 type causes TS2589 on server.tool() generics
+  const tool: (...args: any[]) => any = server.tool.bind(server);
+
+  tool(
     "getTaskById",
     [
       "Get a ClickUp task with images and comments by ID.",
@@ -30,7 +33,7 @@ export function registerTaskToolsRead(server: McpServer, userData: any) {
     {
       readOnlyHint: true
     },
-    async ({ id }) => {
+    async ({ id }: any) => {
       // Resolve custom task ID to internal ID if needed
       const resolvedId = await resolveTaskId(id);
 

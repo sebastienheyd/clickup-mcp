@@ -4,7 +4,10 @@ import { CONFIG } from "../shared/config";
 import { generateListUrl, generateSpaceUrl } from "../shared/utils";
 
 export function registerListToolsRead(server: McpServer) {
-  server.tool(
+  // Workaround: SDK 1.27+ dual Zod v3/v4 type causes TS2589 on server.tool() generics
+  const tool: (...args: any[]) => any = server.tool.bind(server);
+
+  tool(
     "getListInfo",
     [
       "Gets comprehensive information about a list including description and available statuses.",
@@ -19,7 +22,7 @@ export function registerListToolsRead(server: McpServer) {
     {
       readOnlyHint: true
     },
-    async ({ list_id }) => {
+    async ({ list_id }: any) => {
       try {
         // Get list details including statuses (try to get markdown content)
         const listResponse = await fetch(`https://api.clickup.com/api/v2/list/${list_id}?include_markdown_description=true`, {
@@ -120,7 +123,10 @@ export function registerListToolsRead(server: McpServer) {
 }
 
 export function registerListToolsWrite(server: McpServer) {
-  server.tool(
+  // Workaround: SDK 1.27+ dual Zod v3/v4 type causes TS2589 on server.tool() generics
+  const tool: (...args: any[]) => any = server.tool.bind(server);
+
+  tool(
     "updateListInfo",
     [
       "Appends documentation or context to a list's description.",
@@ -139,7 +145,7 @@ export function registerListToolsWrite(server: McpServer) {
       destructiveHint: false,
       idempotentHint: false,
     },
-    async ({ list_id, append_description }) => {
+    async ({ list_id, append_description }: any) => {
       try {
         // Get current list info including description (try to get markdown content)
         const listResponse = await fetch(`https://api.clickup.com/api/v2/list/${list_id}?include_markdown_description=true`, {

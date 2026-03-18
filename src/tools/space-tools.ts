@@ -4,7 +4,10 @@ import { ContentBlock } from "../shared/types";
 import { getSpaceSearchIndex, getSpaceContent, performMultiTermSearch, formatSpaceTree, getFolderDetails, formatFolderTree } from "../shared/utils";
 
 export function registerSpaceTools(server: McpServer) {
-  server.tool(
+  // Workaround: SDK 1.27+ dual Zod v3/v4 type causes TS2589 on server.tool() generics
+  const tool: (...args: any[]) => any = server.tool.bind(server);
+
+  tool(
     "searchSpaces",
     [
       "Searches spaces (sometimes called projects) by name or ID with fuzzy matching.",
@@ -28,7 +31,7 @@ export function registerSpaceTools(server: McpServer) {
     {
       readOnlyHint: true
     },
-    async ({ terms, folder_id, archived = false }) => {
+    async ({ terms, folder_id, archived = false }: any) => {
       try {
         // If folder_id is provided, return folder details directly
         if (folder_id) {

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Mise à jour de `@modelcontextprotocol/sdk` de 1.15.1 vers 1.27.1
+- Renommage de `_registeredTools[].callback` en `.handler` (breaking change SDK)
+- Ajout de wrappers `tool()` pour contourner le TS2589 causé par le double support Zod v3/v4 du SDK
+
 ### Added
 - **Custom Task ID support** - All tools accepting a `task_id` (`getTaskById`, `addComment`, `updateTask`, `searchTasks`) now accept custom task IDs (e.g. `SOI-4422`) in addition to internal IDs. Custom IDs are automatically resolved to internal IDs via the ClickUp API.
 - Added comparison table in README showing differences between this MCP and the official ClickUp MCP

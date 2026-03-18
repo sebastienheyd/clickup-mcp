@@ -51,7 +51,10 @@ function displayPageHierarchy(pageGroup: any, currentPageId: string, depth: numb
 }
 
 export function registerDocumentToolsRead(server: McpServer) {
-  server.tool(
+  // Workaround: SDK 1.27+ dual Zod v3/v4 type causes TS2589 on server.tool() generics
+  const tool: (...args: any[]) => any = server.tool.bind(server);
+
+  tool(
     "readDocument",
     [
       "Get a ClickUp document with page structure and content.",
@@ -73,7 +76,7 @@ export function registerDocumentToolsRead(server: McpServer) {
     {
       readOnlyHint: true
     },
-    async ({ doc_id, page }) => {
+    async ({ doc_id, page }: any) => {
       try {
         // First get the document details and page structure
         const [docResponse, pagesResponse] = await Promise.all([
@@ -207,7 +210,10 @@ export function registerDocumentToolsRead(server: McpServer) {
 }
 
 export function registerDocumentToolsWrite(server: McpServer) {
-  server.tool(
+  // Workaround: SDK 1.27+ dual Zod v3/v4 type causes TS2589 on server.tool() generics
+  const tool: (...args: any[]) => any = server.tool.bind(server);
+
+  tool(
     "updateDocumentPage",
     [
       "Updates an existing document page's content and/or name.",
@@ -242,7 +248,7 @@ export function registerDocumentToolsWrite(server: McpServer) {
       destructiveHint: true,
       idempotentHint: false,
     },
-    async ({ doc_id, page_id, name, content, append = false }) => {
+    async ({ doc_id, page_id, name, content, append = false }: any) => {
       try {
         const requestBody: any = {};
 
@@ -315,7 +321,7 @@ export function registerDocumentToolsWrite(server: McpServer) {
     }
   );
 
-  server.tool(
+  tool(
     "createDocumentOrPage",
     [
       "Creates a new document with its first page, OR adds a page to an existing document.",
@@ -357,7 +363,7 @@ export function registerDocumentToolsWrite(server: McpServer) {
       idempotentHint: false,
       openWorldHint: true
     },
-    async ({ space_id, list_id, doc_id, parent_page_id, name, content }) => {
+    async ({ space_id, list_id, doc_id, parent_page_id, name, content }: any) => {
       try {
         // Validate mutually exclusive parameters
         const locationParams = [space_id, list_id, doc_id].filter(Boolean).length;
