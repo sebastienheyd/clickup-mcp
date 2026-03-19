@@ -4,7 +4,9 @@
   "description": "Search, create, and retrieve tasks, add comments, and track time through natural language commands.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "bin": "dist/index.js",
+  "bin": {
+    "clickup-mcp": "dist/index.js"
+  },
   "files": [
     "dist",
     "README.md"
@@ -34,10 +36,7 @@
     "agentic-coding",
     "automation"
   ],
-  "author": {
-    "name": "Sébastien HEYD",
-    "url": "https://github.com/sebastienheyd"
-  },
+  "author": "Sébastien HEYD (https://github.com/sebastienheyd)",
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
