@@ -403,7 +403,31 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
           throw new Error(`Error creating task: ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
         }
 
-        const createdTask = await response.json();
+        let createdTask = await response.json();
+
+        // Handle tags separately via dedicated API endpoints
+        if (tags && tags.length > 0) {
+          for (const tagName of tags) {
+            const encodedTag = encodeURIComponent(tagName);
+            const tagResponse = await fetch(`https://api.clickup.com/api/v2/task/${createdTask.id}/tag/${encodedTag}`, {
+              method: 'POST',
+              headers: {
+                Authorization: CONFIG.apiKey,
+                'Content-Type': 'application/json'
+              }
+            });
+            if (!tagResponse.ok) {
+              console.error(`Error adding tag "${tagName}" to task ${createdTask.id}: ${tagResponse.status}`);
+            }
+          }
+          // Re-fetch task to get updated tags
+          const refreshResponse = await fetch(`https://api.clickup.com/api/v2/task/${createdTask.id}`, {
+            headers: { Authorization: CONFIG.apiKey }
+          });
+          if (refreshResponse.ok) {
+            createdTask = await refreshResponse.json();
+          }
+        }
 
         const responseLines = formatTaskResponse(createdTask, 'created', {
           list_id, name, description, status, priority, due_date, start_date, time_estimate, tags, parent_task_id, assignees
