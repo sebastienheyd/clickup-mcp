@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-03-19
+
 ### Fixed
 - Fix tags not being added when creating a task (tags were ignored in the request body and not handled post-creation)
 
