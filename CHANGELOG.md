@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-03-19
+
 ### Changed
 - Mise à jour de `@modelcontextprotocol/sdk` de 1.15.1 vers 1.27.1
 - Renommage de `_registeredTools[].callback` en `.handler` (breaking change SDK)
