@@ -52,7 +52,7 @@
     },
     {
       "name": "searchTasks",
-      "description": "Search tasks by name, content, assignees, and ID with fuzzy matching and support for multiple search terms (OR logic). Can filter by list_ids, space_ids, todo status, or tasks assigned to current user."
+      "description": "Search tasks by name, content, assignees, and ID with fuzzy matching and support for multiple search terms (OR logic). Can filter by list_ids, space_ids, todo status, or tasks assigned to current user. Supports include_closed and archived flags to include closed or archived tasks (both default to false)."
     },
     {
       "name": "searchSpaces",

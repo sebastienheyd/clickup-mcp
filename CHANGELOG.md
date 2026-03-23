@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Custom Task ID support** - All tools accepting a `task_id` (`getTaskById`, `addComment`, `updateTask`, `searchTasks`) now accept custom task IDs (e.g. `SOI-4422`) in addition to internal IDs. Custom IDs are automatically resolved to internal IDs via the ClickUp API.
 - Added comparison table in README showing differences between this MCP and the official ClickUp MCP
 - Extended `searchSpaces` with `folder_id` parameter to resolve a ClickUp folder by ID, returning its lists, statuses, and parent space
+- Added `include_closed` and `archived` parameters to `searchTasks` to optionally include closed or archived tasks (both default to false)
 
 ### Fixed
 - `getFolderDetails()` now fetches lists via dedicated `/folder/{id}/list` endpoint instead of relying on the folder payload embedding them

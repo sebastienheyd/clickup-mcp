@@ -247,13 +247,17 @@ const taskIndices: Map<string, Promise<Fuse<any>>> = new Map();
 export async function getTaskSearchIndex(
   space_ids?: string[],
   list_ids?: string[],
-  assignees?: string[]
+  assignees?: string[],
+  include_closed?: boolean,
+  archived?: boolean
 ): Promise<Fuse<any> | null> {
   // Create cache key from sorted filter arrays
   const key = JSON.stringify({
     space_ids: space_ids?.sort(),
     list_ids: list_ids?.sort(),
-    assignees: assignees?.sort()
+    assignees: assignees?.sort(),
+    include_closed,
+    archived
   });
 
   // Check for existing valid index promise
@@ -265,7 +269,7 @@ export async function getTaskSearchIndex(
   // Create the fetch promise
   const fetchPromise = (async (): Promise<Fuse<any>> => {
     console.error(`Refreshing task index for filters: ${key}`);
-    const tasks = await fetchTasks(space_ids, list_ids, assignees);
+    const tasks = await fetchTasks(space_ids, list_ids, assignees, include_closed, archived);
     const index = createFuseIndex(tasks);
     console.error(`Task index created with ${tasks.length} tasks`);
     return index;
@@ -287,9 +291,18 @@ export async function getTaskSearchIndex(
 async function fetchTasks(
   space_ids?: string[],
   list_ids?: string[],
-  assignees?: string[]
+  assignees?: string[],
+  include_closed?: boolean,
+  archived?: boolean
 ): Promise<any[]> {
   const queryParams = ['order_by=updated', 'subtasks=true'];
+
+  if (include_closed) {
+    queryParams.push('include_closed=true');
+  }
+  if (archived) {
+    queryParams.push('archived=true');
+  }
 
   // Add filter parameters
   if (space_ids?.length) {

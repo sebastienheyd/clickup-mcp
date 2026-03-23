@@ -55,15 +55,23 @@ export function registerSearchTools(server: McpServer, userData: any) {
         .boolean()
         .optional()
         .describe(`Filter for tasks assigned to the current user (${userData.user.username} (${userData.user.id}))`),
+      include_closed: z
+        .boolean()
+        .optional()
+        .describe("Include closed tasks in results (default: false)"),
+      archived: z
+        .boolean()
+        .optional()
+        .describe("Include archived tasks in results (default: false). Note: only returns individually archived tasks, not tasks in archived spaces/folders/lists."),
     },
     {
       readOnlyHint: true
     },
-    async ({terms, list_ids, space_ids, only_todo, status, assigned_to_me}: any) => {
+    async ({terms, list_ids, space_ids, only_todo, status, assigned_to_me, include_closed, archived}: any) => {
       // Get current user ID if filtering by assigned_to_me
       const assignees = assigned_to_me ? [userData.user.id as string] : [];
 
-      const searchIndex = await getTaskSearchIndex(space_ids, list_ids, assignees);
+      const searchIndex = await getTaskSearchIndex(space_ids, list_ids, assignees, include_closed, archived);
       if (!searchIndex) {
         return {
           content: [
