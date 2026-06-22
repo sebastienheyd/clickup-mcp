@@ -39,7 +39,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
     })(),
     {
       task_id: z.string().min(1).refine(val => isTaskId(val) || isCustomTaskId(val), {
-        message: "Must be an internal task ID (6-9 alphanumeric characters) or a custom task ID (e.g. SOI-4422)"
+        message: "Must be an internal task ID (6+ alphanumeric characters) or a custom task ID (e.g. SOI-4422)"
       }).describe("The task ID to comment on: internal ID (e.g. \"869c4za0g\") or custom ID (e.g. \"SOI-4422\")"),
       comment: z.string().min(1).describe("The comment text to add to the task"),
     },
@@ -131,7 +131,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
     })(),
     {
       task_id: z.string().min(1).refine(val => isTaskId(val) || isCustomTaskId(val), {
-        message: "Must be an internal task ID (6-9 alphanumeric characters) or a custom task ID (e.g. SOI-4422)"
+        message: "Must be an internal task ID (6+ alphanumeric characters) or a custom task ID (e.g. SOI-4422)"
       }).describe("The task ID to update: internal ID (e.g. \"869c4za0g\") or custom ID (e.g. \"SOI-4422\")"),
       name: taskNameSchema.optional(),
       append_description: z.string().optional().describe("Optional markdown content to APPEND to existing task description (preserves existing content for safety)"),

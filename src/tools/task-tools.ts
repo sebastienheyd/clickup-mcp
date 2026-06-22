@@ -24,10 +24,10 @@ export function registerTaskToolsRead(server: McpServer, userData: any) {
         .string()
         .min(1)
         .refine(val => isTaskId(val) || isCustomTaskId(val), {
-          message: "Must be an internal task ID (6-9 alphanumeric characters) or a custom task ID (e.g. SOI-4422)"
+          message: "Must be an internal task ID (6+ alphanumeric characters) or a custom task ID (e.g. SOI-4422)"
         })
         .describe(
-          `The task ID: either an internal ID (6-9 alphanumeric characters like "869c4za0g") or a custom task ID (e.g. "SOI-4422"). Do not include prefixes like "#", "CU-" or URLs.`
+          `The task ID: either an internal ID (6+ alphanumeric characters like "869c4za0g") or a custom task ID (e.g. "SOI-4422"). Do not include prefixes like "#", "CU-" or URLs.`
         ),
     },
     {

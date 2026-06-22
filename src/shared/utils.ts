@@ -5,11 +5,12 @@ const GLOBAL_REFRESH_INTERVAL = 60000; // 60 seconds - that is the rate limit ti
 
 /**
  * Checks if a string looks like a valid ClickUp task ID
- * Valid task IDs are 6-9 characters long and contain only alphanumeric characters
+ * Valid task IDs are at least 6 characters long and contain only alphanumeric characters.
+ * No upper bound: ClickUp now issues IDs of 10+ characters (e.g. "wdrv93ebwx").
  */
 export function isTaskId(str: string): boolean {
-  // Task IDs are 6-9 characters long and contain only alphanumeric characters
-  return /^[a-z0-9]{6,9}$/i.test(str);
+  // Task IDs are 6+ characters long and contain only alphanumeric characters
+  return /^[a-z0-9]{6,}$/i.test(str);
 }
 
 /**
@@ -53,7 +54,7 @@ export async function resolveTaskId(id: string): Promise<string> {
   if (isCustomTaskId(id)) {
     return resolveCustomTaskId(id);
   }
-  throw new Error(`Invalid task ID format: "${id}". Expected an internal ID (6-9 alphanumeric characters) or a custom ID (e.g. "SOI-4422").`);
+  throw new Error(`Invalid task ID format: "${id}". Expected an internal ID (6+ alphanumeric characters) or a custom ID (e.g. "SOI-4422").`);
 }
 
 // Cache for current user info to avoid repeated API calls and race conditions

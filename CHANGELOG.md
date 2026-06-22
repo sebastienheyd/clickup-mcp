@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Removed the brittle 6-9 character cap on `isTaskId`, so internal task IDs of 10+ characters (e.g. `wdrv93ebwx`) are now accepted
+- `getTimeEntries` and `createTimeEntry` now accept custom task IDs (e.g. `SOI-4422`) and resolve them to internal IDs, like the other task tools
+
 ## [1.7.2] - 2026-03-23
 
 ### Added
