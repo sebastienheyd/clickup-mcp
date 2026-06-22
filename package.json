@@ -1,6 +1,6 @@
 {
   "name": "@sebastienheyd/clickup-mcp",
-  "version": "1.7.3",
+  "version": "1.7.4",
   "description": "Search, create, and retrieve tasks, add comments, and track time through natural language commands.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -17,7 +17,7 @@
     "dev": "npx tsc -w & nodemon dist/index.js",
     "cli": "npx ts-node src/cli.ts",
     "prettier": "prettier --write src/**/*.ts",
-    "prepublishOnly": "rm -r dist && npm run build",
+    "prepublishOnly": "rm -r dist && npm run build && chmod +x dist/index.js",
     "release": "npm run build && npm publish --access public && git add . && git commit -m \"Release v$(node -p 'require(\"./package.json\").version')\" && git tag -a v$(node -p 'require(\"./package.json\").version') -m \"Release v$(node -p 'require(\"./package.json\").version')\" && git push && git push --tags",
     "mcpb": "npm run build && mcpb pack . ClickUp.mcpb",
     "test": "node --test -r ts-node/register src/**/*.test.ts"
