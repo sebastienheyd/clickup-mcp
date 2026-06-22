@@ -37,9 +37,9 @@ test("createTimeEntry posts correct body", async (t) => {
 
   registerTimeToolsWrite(serverStub);
 
-  const result = await tools.createTimeEntry({ task_id: "task1", hours: 2, description: "Work" });
+  const result = await tools.createTimeEntry({ task_id: "task01", hours: 2, description: "Work" });
 
-  assert.equal(bodyCaptured.tid, "task1");
+  assert.equal(bodyCaptured.tid, "task01");
   assert.equal(bodyCaptured.duration, 2 * 60 * 60 * 1000);
   assert.ok(result.content[0].text.includes("Time entry created successfully"));
 

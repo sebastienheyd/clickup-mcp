@@ -16,7 +16,7 @@ test("getTimeEntries requests time entries for task", async (t) => {
 
   client
     .intercept({
-      path: /\/api\/v2\/team\/team1\/time_entries\?.*task_id=task1.*/,
+      path: /\/api\/v2\/team\/team1\/time_entries\?.*task_id=task01.*/,
       method: "GET",
     })
     .reply(200, { data: [] });
@@ -36,7 +36,7 @@ test("getTimeEntries requests time entries for task", async (t) => {
 
   registerTimeToolsRead(serverStub);
 
-  const result = await tools.getTimeEntries({ task_id: "task1" });
+  const result = await tools.getTimeEntries({ task_id: "task01" });
   assert.ok(result.content[0].text.includes("Time Entries Summary"));
 
   await mockAgent.close();
