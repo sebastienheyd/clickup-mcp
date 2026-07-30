@@ -12,9 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Accepted sources: local file paths, `data:` URIs, http(s) URLs, and existing ClickUp attachment URLs (reused without re-uploading).
   Because the server runs locally, a screenshot can be referenced by path instead of being inlined as base64, which costs orders of magnitude fewer tokens.
   The caption becomes the attachment filename, which is what ClickUp displays beneath the image.
-  Only real PNG/JPEG/GIF/WebP files are uploaded (verified via magic bytes); a failing image is reported in the response instead of aborting the write.
+  Only real PNG/JPEG/GIF/WebP files are uploaded (verified via magic bytes).
 - New `MAX_UPLOAD_SIZE_MB` environment variable (default 10) to cap the size of a single uploaded image
 - New `npm run smoke` protocol smoke test that drives the built server over real MCP stdio (initialize, tools/list, tool schemas) and optionally posts a comment with an image. `npm run cli` calls tool callbacks directly and never covered this layer.
+- Tests for the image failure paths: missing local file, non-image file, unreachable http(s) URL, upload API error with partial success, and abort behaviour of all three write tools.
+
+### Changed
+- **Image failures abort the write instead of degrading it.** A broken image reference (missing file, dead URL, file that is not a real image, oversized upload) makes `addComment`, `createTask` and `updateTask` fail with a per-image error report *before* anything is written - no comment is posted, no task is created or modified. The caller can fix the markdown and retry without creating duplicates.
+- `createTask` resolves and validates all description images before creating the task. Only an upload API failure after creation is reported as a WARNING, since the task already exists at that point.
+- When an upload fails halfway through a batch, the error lists the images that were already uploaded with their CDN URLs, so a retry can reference those URLs directly instead of uploading them again.
 
 ## [1.7.4] - 2026-06-22
 
