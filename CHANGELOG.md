@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`editComment` tool** - replaces the text of an existing task comment instead of forcing a follow-up comment when something in a just-posted comment turns out to be wrong. Formatting and images survive the edit, because ClickUp's `PUT /comment/{id}` accepts the same rich fragment array as comment creation (undocumented - the API reference only lists `comment_text`, which would flatten the comment to plain text). Images are resolved and uploaded before the edit, so a broken image reference leaves the existing comment untouched.
+- Two guardrails, since ClickUp cannot distinguish a comment written through this MCP from one written by the same user in the web UI:
+  - only comments belonging to the API token's own user can be edited, so other people's comments are safe
+  - only comments created within `CLICKUP_COMMENT_EDIT_WINDOW_HOURS` (default 24) can be edited. Editing does not change the creation date, so the window cannot be extended by repeated edits.
+- New `CLICKUP_COMMENT_EDIT_WINDOW_HOURS` environment variable (default 24, `0` disables `editComment`). An unparsable value fails at startup instead of silently widening or disabling the window.
 - **Inline image upload** - `![caption](path)` in `addComment`, `createTask` and `updateTask` now uploads the image and embeds it in the ticket.
   Accepted sources: local file paths, `data:` URIs, http(s) URLs, and existing ClickUp attachment URLs (reused without re-uploading).
   Because the server runs locally, a screenshot can be referenced by path instead of being inlined as base64, which costs orders of magnitude fewer tokens.
@@ -18,9 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tests for the image failure paths: missing local file, non-image file, unreachable http(s) URL, upload API error with partial success, and abort behaviour of all three write tools.
 
 ### Changed
+- **Images are now read back as markdown.** `getTaskById` used to render an image inside a comment or description as `Image: name - url`, which is not something the write tools understand. It is now `![name](url)`, the same syntax `addComment`/`editComment`/`createTask`/`updateTask` accept. This closes the read-edit round trip: a comment read from a task can be handed back to `editComment` unchanged and keeps its images, because an existing ClickUp attachment URL is re-embedded instead of re-uploaded.
 - **Image failures abort the write instead of degrading it.** A broken image reference (missing file, dead URL, file that is not a real image, oversized upload) makes `addComment`, `createTask` and `updateTask` fail with a per-image error report *before* anything is written - no comment is posted, no task is created or modified. The caller can fix the markdown and retry without creating duplicates.
 - `createTask` resolves and validates all description images before creating the task. Only an upload API failure after creation is reported as a WARNING, since the task already exists at that point.
 - When an upload fails halfway through a batch, the error lists the images that were already uploaded with their CDN URLs, so a retry can reference those URLs directly instead of uploading them again.
+
+### Notes
+- ClickUp shows no "edited" marker on a changed comment and exposes none via the API, so readers who already saw the original will not notice the change. The tool description tells the model to prefer a follow-up comment once a discussion has started.
+- Replies inside a comment thread live behind a different endpoint and cannot be edited; `editComment` reports this instead of failing silently.
+- `GET /task/{id}/comment` returns only the 25 newest comments per page (`start_date` is not a real parameter and is ignored). `editComment` pages back with `start`/`start_id` and stops as soon as a page ends outside the edit window, so a busy ticket still costs a single request in the normal case.
 
 ## [1.7.4] - 2026-06-22
 
