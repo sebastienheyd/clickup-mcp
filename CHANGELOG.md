@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.8.0] - 2026-08-17
 
 ### Added
 - **`editComment` tool** - replaces the text of an existing task comment instead of forcing a follow-up comment when something in a just-posted comment turns out to be wrong. Formatting and images survive the edit, because ClickUp's `PUT /comment/{id}` accepts the same rich fragment array as comment creation (undocumented - the API reference only lists `comment_text`, which would flatten the comment to plain text). Images are resolved and uploaded before the edit, so a broken image reference leaves the existing comment untouched.
