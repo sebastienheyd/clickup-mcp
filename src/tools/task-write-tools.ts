@@ -345,6 +345,74 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
   );
 
   tool(
+    "deleteComment",
+    [
+      "Deletes a task comment. This cannot be undone - the deleted text is echoed back so it can be re-posted with addComment if needed.",
+      `GUARDRAILS: same as editComment - only comments written by the API token's own user can be deleted, and only within ${CONFIG.commentEditWindowHours} hours of their creation. Replies inside a thread cannot be deleted.`,
+    ].join("\n"),
+    {
+      task_id: z.string().min(1).refine(val => isTaskId(val) || isCustomTaskId(val), {
+        message: "Must be an internal task ID (6+ alphanumeric characters) or a custom task ID (e.g. SOI-4422)"
+      }).describe("The ID of the task the comment belongs to - needed to locate the comment. Internal ID (e.g. \"869c4za0g\") or custom ID (e.g. \"SOI-4422\")"),
+      comment_id: z.string().min(1).describe("The ID of the comment to delete, as returned by addComment or getTaskById"),
+    },
+    {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+    },
+    async ({ task_id, comment_id }: any) => {
+      try {
+        const resolved_task_id = await resolveTaskId(task_id);
+
+        const [existing, userData] = await Promise.all([
+          findTaskComment(resolved_task_id, comment_id),
+          getCurrentUser(),
+        ]);
+
+        assertCommentIsEditable(existing, userData.user.id, 'deleted');
+
+        const response = await fetch(`https://api.clickup.com/api/v2/comment/${comment_id}`, {
+          method: 'DELETE',
+          headers: { Authorization: CONFIG.apiKey }
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(`Error deleting comment: ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
+        }
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: [
+                `Comment deleted successfully!`,
+                `comment_id: ${comment_id}`,
+                `task_id: ${resolved_task_id}`,
+                `task_url: https://app.clickup.com/t/${resolved_task_id}`,
+                `created: ${timestampToIso(existing.date)}`,
+                `deleted_text: ${existing.comment_text || '(no plain text available)'}`,
+              ].join('\n')
+            }
+          ],
+        };
+
+      } catch (error) {
+        console.error('Error deleting comment:', error);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error deleting comment: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  tool(
     "updateTask",
     (() => {
       const descriptionBase = [
@@ -905,24 +973,25 @@ async function findTaskComment(taskId: string, commentId: string): Promise<Exist
  * other people's comments safe, and the time window is what keeps the tool from
  * rewriting history.
  */
-function assertCommentIsEditable(comment: ExistingComment, currentUserId: number | string): void {
+function assertCommentIsEditable(comment: ExistingComment, currentUserId: number | string, action: 'edited' | 'deleted' = 'edited'): void {
   const windowHours = CONFIG.commentEditWindowHours;
+  const verb = action === 'deleted' ? 'Deleting' : 'Editing';
   if (!(windowHours > 0)) {
     throw new Error(
-      `Editing comments is disabled (CLICKUP_COMMENT_EDIT_WINDOW_HOURS=${windowHours}). Add a new comment instead.`
+      `${verb} comments is disabled (CLICKUP_COMMENT_EDIT_WINDOW_HOURS=${windowHours}). Add a new comment instead.`
     );
   }
 
   if (String(comment.user?.id ?? '') !== String(currentUserId)) {
     throw new Error(
-      `Comment ${comment.id} was written by ${comment.user?.username || 'someone else'} (user_id: ${comment.user?.id ?? 'unknown'}), not by the current user (user_id: ${currentUserId}). Only your own comments can be edited - reply with a new comment instead.`
+      `Comment ${comment.id} was written by ${comment.user?.username || 'someone else'} (user_id: ${comment.user?.id ?? 'unknown'}), not by the current user (user_id: ${currentUserId}). Only your own comments can be ${action} - reply with a new comment instead.`
     );
   }
 
   const ageHours = (Date.now() - Number(comment.date)) / (1000 * 60 * 60);
   if (ageHours > windowHours) {
     throw new Error(
-      `Comment ${comment.id} was created ${ageHours.toFixed(1)} hours ago (${timestampToIso(comment.date)}), which is outside the ${windowHours} hour edit window. Add a new comment instead of rewriting an old one.`
+      `Comment ${comment.id} was created ${ageHours.toFixed(1)} hours ago (${timestampToIso(comment.date)}), which is outside the ${windowHours} hour edit window. Comments that old can no longer be ${action} - add a new comment instead.`
     );
   }
 }
