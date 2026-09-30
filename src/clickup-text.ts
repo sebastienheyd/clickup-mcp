@@ -842,7 +842,26 @@ function walkMdastNodes(
         }
         break;
     }
+
+    // Keep the blank line the source puts between two blocks: remark drops it, and
+    // ClickUp would otherwise glue paragraphs and lists into one dense block
+    if (hasBlankLineBefore(nodes[i + 1], node)) {
+      blocks.push({ text: '\n', attributes: {} });
+    }
   }
+}
+
+/**
+ * Whether the source has at least one blank line between `previous` and `next`.
+ * Several blank lines count as one, as in rendered markdown.
+ */
+function hasBlankLineBefore(next: Content | undefined, previous: Content): boolean {
+  const previousEnd = previous.position?.end.line;
+  const nextStart = next?.position?.start.line;
+  if (previousEnd === undefined || nextStart === undefined) {
+    return false;
+  }
+  return nextStart - previousEnd > 1;
 }
 
 /**

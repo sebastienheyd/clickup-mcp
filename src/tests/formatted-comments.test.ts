@@ -147,3 +147,31 @@ test("convertMarkdownToClickUpBlocks handles mixed nested lists", () => {
   assert.ok(nestedNumber, "should have nested numbered item");
   assert.ok(deepBullet, "should have nested bullet inside numbered list");
 });
+
+test("convertMarkdownToClickUpBlocks keeps blank lines between paragraphs", () => {
+  const markdown = "First paragraph.\n\nSecond paragraph.";
+  const blocks = convertMarkdownToClickUpBlocks(markdown);
+
+  const text = blocks.map(b => b.text).join("");
+  assert.equal(text, "First paragraph.\n\nSecond paragraph.");
+});
+
+test("convertMarkdownToClickUpBlocks keeps a blank line after a list", () => {
+  const markdown = "Delivered:\n- item one\n- item two\n\nClosing paragraph.";
+  const blocks = convertMarkdownToClickUpBlocks(markdown);
+
+  const text = blocks.map(b => b.text).join("");
+  // No blank line between the intro and the list: none in the source either
+  assert.equal(text, "Delivered:\nitem one\nitem two\n\nClosing paragraph.");
+
+  const lastItem = blocks.map(b => !!b.attributes?.list).lastIndexOf(true);
+  const blank = blocks[lastItem + 1];
+  assert.deepEqual(blank, { text: "\n", attributes: {} }, "the blank line must not carry list formatting");
+});
+
+test("convertMarkdownToClickUpBlocks collapses several blank lines into one", () => {
+  const markdown = "First.\n\n\n\nSecond.";
+  const blocks = convertMarkdownToClickUpBlocks(markdown);
+
+  assert.equal(blocks.map(b => b.text).join(""), "First.\n\nSecond.");
+});
