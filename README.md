@@ -4,6 +4,36 @@
 
 Model Context Protocol (MCP) server enabling AI assistants to interact with ClickUp workspaces. Get complete task context with comments and images, search across projects, create and update tasks, collaborate through comments, and track time - all through natural language.
 
+## Differences From the Upstream Project
+
+This fork is published as [`@sebastienheyd/clickup-mcp`](https://www.npmjs.com/package/@sebastienheyd/clickup-mcp) and follows its own version numbers. Upstream changes are picked up selectively, so the two projects diverge in both directions. Comparison as of this fork's 1.9.0 and upstream's 1.9.0 (September 2026):
+
+**Only in this fork**
+
+| Area | Addition |
+|------|----------|
+| Task IDs | Custom task IDs (e.g. `SOI-4422`) accepted wherever a `task_id` is expected, time tools included; no upper bound on generated ID length |
+| `searchTasks` | `include_closed` and `archived` filters |
+| `searchSpaces` | `folder_id` to resolve a single folder with its lists and statuses |
+| `createTask` / `updateTask` | Sprint `points`; `remove_assignees`; `null` clears `due_date`, `start_date`, `time_estimate` and `points` |
+| Descriptions | `replace_description` on `updateTask` **and** `updateListInfo`, both echoing the previous description (upstream: `description` on `updateTask` only) |
+| Comments | `deleteComment` (same guardrails as `editComment`) |
+| Time tracking | `updateTimeEntry` and `deleteTimeEntry`; `getTimeEntries` shows each `entry_id` |
+| Tooling | `Makefile` with the common commands; `npm run cli` understands `key=null` |
+| Runtime | Node.js 20 or newer (upstream: 16) |
+
+**Only upstream (not merged here yet)**
+
+| Area | Upstream feature |
+|------|------------------|
+| `getTaskById` | Threaded comment replies rendered under their parent; `waiting_on` / `blocking` / `linked_tasks` lines; comment history paged beyond the 25 newest |
+| `addComment` | `parent_comment_id` to reply inside a thread |
+| Comment formatting | Markdown tables (rendered as code blocks), `~~strikethrough~~`, multi-line code blocks |
+| `updateTask` | Removing task links via `linked_tasks` actually works (link records are identified by their far end) |
+| MCPB installer | `CLICKUP_COMMENT_EDIT_WINDOW_HOURS` and `MAX_UPLOAD_SIZE_MB` exposed as installer fields |
+
+Features present in both (inline image upload, `editComment`, task URL mentions in comments, blank lines between comment paragraphs) were implemented on each side and may differ in detail. See [CHANGELOG.md](CHANGELOG.md) for this fork's history and the [upstream changelog](https://github.com/hauptsacheNet/clickup-mcp/blob/main/CHANGELOG.md) for theirs.
+
 ## This MCP vs Official ClickUp MCP
 
 > See also: [Official ClickUp MCP Documentation](https://developer.clickup.com/docs/connect-an-ai-assistant-to-clickups-mcp-server)
