@@ -381,7 +381,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
       points: taskPointsSchema.nullable().describe(taskPointsSchema.description + CLEAR_HINT),
       tags: taskTagsSchema.describe("Optional array of tag names (will replace existing tags)"),
       parent_task_id: z.string().optional().describe("Optional parent task ID to change parent/child relationships"),
-      assignees: z.array(z.string()).optional().describe(createAssigneeDescription(userData) + " Existing assignees are kept."),
+      assignees: z.array(z.string()).optional().describe("Optional array of user IDs to add as assignees - existing assignees are kept"),
       remove_assignees: z.array(z.string()).optional().describe("Optional array of user IDs to unassign from the task. Combine with assignees to replace one assignee by another."),
       waiting_on: z.array(z.string()).optional().describe("Optional array of task IDs that this task should wait on (will replace existing waiting_on relationships)"),
       blocking: z.array(z.string()).optional().describe("Optional array of task IDs that this task should block. Note: This creates dependencies FROM those tasks TO this task (those tasks will wait on this one)"),
