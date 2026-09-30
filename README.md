@@ -96,7 +96,7 @@ Turn natural language into powerful ClickUp actions:
 - Create, read, and update documents and pages
 - Add comments and collaborate with team members
 - Manage priorities, due dates, assignees, and tags
-- Handle time estimates and custom field values
+- Handle time estimates, sprint points and custom field values
 
 ### 🔒 **Safety Features**
 - **Append-Only Descriptions**: Description fields are never overwritten - new content is safely appended with timestamps

@@ -333,6 +333,11 @@ export async function generateTaskMetadata(task: any, timeEntries?: any[], isDet
     metadataLines.push(`time_estimate: ${hours}h ${minutes}m`);
   }
 
+  // Add sprint points if they exist
+  if (task.points !== undefined && task.points !== null) {
+    metadataLines.push(`points: ${task.points}`);
+  }
+
   // Add time booked (tracked time entries) - only if timeEntries provided
   if (timeEntries) {
     const timeBooked = filterTaskTimeEntries(task.id, timeEntries);

@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Sprint points** - `createTask` and `updateTask` accept an optional `points` parameter (non-negative number) mapped to ClickUp's `points` task field. `getTaskById` now shows the task's sprint points when set. Requires the Sprint Points ClickApp to be enabled on the space. Valid values depend on the points scale each workspace configures, so they are not validated locally - ClickUp rejects anything off the scale with `not a valid points selection`.
+- **Unassigning users** - `updateTask` accepts `remove_assignees` (user IDs), sent as the `rem` side of ClickUp's `assignees` object. Combined with `assignees`, one person can be swapped for another in a single call. Previously assignees could only be added.
+- **Clearing values** - `updateTask` accepts `null` for `due_date`, `start_date`, `time_estimate` and `points` to remove the current value. `null` is sent as is: converting it like a real date would have set it to 1970-01-01. The time estimate is the exception - ClickUp accepts `null` but silently keeps the estimate, so it is cleared by sending `0` (verified against the live API).
+
 ## [1.8.1] - 2026-09-30
 
 ### Fixed

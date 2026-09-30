@@ -41,11 +41,13 @@ test("createTask posts task with defaults", async (t) => {
 
   registerTaskToolsWrite(serverStub, { user: { username: "me", id: "u1" } });
 
-  const result = await tools.createTask({ list_id: "list123", name: "New Task", description: "Desc" });
+  const result = await tools.createTask({ list_id: "list123", name: "New Task", description: "Desc", points: 0.5 });
 
   assert.equal(bodyCaptured.name, "New Task");
   assert.equal(bodyCaptured.markdown_description, "Desc");
   assert.deepEqual(bodyCaptured.assignees, ["u1"]);
+  assert.equal(bodyCaptured.points, 0.5);
+  assert.ok(result.content[0].text.includes("points: 0.5"));
   assert.ok(result.content[0].text.includes("Task created successfully"));
 
   await mockAgent.close();

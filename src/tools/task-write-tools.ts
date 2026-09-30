@@ -130,7 +130,9 @@ const taskPrioritySchema = z.enum(["urgent", "high", "normal", "low"]).optional(
 const taskDueDateSchema = z.string().optional().describe("Optional due date as ISO date string (e.g., '2024-10-06T23:59:59+02:00')");
 const taskStartDateSchema = z.string().optional().describe("Optional start date as ISO date string (e.g., '2024-10-06T09:00:00+02:00')");
 const taskTimeEstimateSchema = z.number().optional().describe("Optional time estimate in hours (will be converted to milliseconds)");
+const taskPointsSchema = z.number().nonnegative().optional().describe("Optional sprint points - requires the Sprint Points ClickApp on the space. Valid values depend on the points scale configured in that workspace: ClickUp rejects any other value with 'not a valid points selection'");
 const taskTagsSchema = z.array(z.string()).optional().describe("Optional array of tag names");
+const CLEAR_HINT = " - pass null to clear the current value";
 
 export function registerTaskToolsWrite(server: McpServer, userData: any) {
   // Workaround: SDK 1.27+ dual Zod v3/v4 type causes TS2589 on server.tool() generics
@@ -373,12 +375,14 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
       append_description: z.string().optional().describe("Optional markdown content to APPEND to existing task description (preserves existing content for safety)"),
       status: z.string().optional().describe("Optional new status name - use getListInfo to see valid options"),
       priority: taskPrioritySchema,
-      due_date: taskDueDateSchema,
-      start_date: taskStartDateSchema,
-      time_estimate: taskTimeEstimateSchema,
+      due_date: taskDueDateSchema.nullable().describe(taskDueDateSchema.description + CLEAR_HINT),
+      start_date: taskStartDateSchema.nullable().describe(taskStartDateSchema.description + CLEAR_HINT),
+      time_estimate: taskTimeEstimateSchema.nullable().describe(taskTimeEstimateSchema.description + CLEAR_HINT),
+      points: taskPointsSchema.nullable().describe(taskPointsSchema.description + CLEAR_HINT),
       tags: taskTagsSchema.describe("Optional array of tag names (will replace existing tags)"),
       parent_task_id: z.string().optional().describe("Optional parent task ID to change parent/child relationships"),
-      assignees: z.array(z.string()).optional().describe(createAssigneeDescription(userData)),
+      assignees: z.array(z.string()).optional().describe(createAssigneeDescription(userData) + " Existing assignees are kept."),
+      remove_assignees: z.array(z.string()).optional().describe("Optional array of user IDs to unassign from the task. Combine with assignees to replace one assignee by another."),
       waiting_on: z.array(z.string()).optional().describe("Optional array of task IDs that this task should wait on (will replace existing waiting_on relationships)"),
       blocking: z.array(z.string()).optional().describe("Optional array of task IDs that this task should block. Note: This creates dependencies FROM those tasks TO this task (those tasks will wait on this one)"),
       linked_tasks: z.array(z.string()).optional().describe("Optional array of task IDs to link as related tasks without blocking (will replace existing linked tasks)")
@@ -389,7 +393,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
       idempotentHint: false,
       openWorldHint: true
     },
-    async ({ task_id, name, append_description, status, priority, due_date, start_date, time_estimate, tags, parent_task_id, assignees, blocking, waiting_on, linked_tasks }: any) => {
+    async ({ task_id, name, append_description, status, priority, due_date, start_date, time_estimate, points, tags, parent_task_id, assignees, remove_assignees, blocking, waiting_on, linked_tasks }: any) => {
       try {
         // Resolve custom task ID to internal ID if needed
         const resolved_task_id = await resolveTaskId(task_id);
@@ -495,7 +499,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
 
         // Build update body without tags (they're handled separately)
         const updateBody = buildTaskRequestBody({
-          name, status, priority, due_date, start_date, time_estimate, parent_task_id, assignees
+          name, status, priority, due_date, start_date, time_estimate, points, parent_task_id, assignees
         });
 
         // Add markdown description if we have content to append
@@ -503,9 +507,9 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
           updateBody.markdown_description = finalDescription;
         }
 
-        // Handle assignees for updates (different from creates)
-        if (assignees !== undefined) {
-          updateBody.assignees = { add: assignees, rem: [] }; // Add new assignees, remove none
+        // Handle assignees for updates (different from creates) - ClickUp requires both add and rem
+        if (assignees !== undefined || remove_assignees !== undefined) {
+          updateBody.assignees = { add: assignees ?? [], rem: remove_assignees ?? [] };
         }
 
         // Check if there's anything to update (including tags and dependencies which were handled separately)
@@ -551,7 +555,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
         }
 
         const responseLines = formatTaskResponse(updatedTask, 'updated', {
-          name, append_description, status, priority, due_date, start_date, time_estimate, tags, parent_task_id, assignees, blocking, waiting_on, linked_tasks
+          name, append_description, status, priority, due_date, start_date, time_estimate, points, tags, parent_task_id, assignees, remove_assignees, blocking, waiting_on, linked_tasks
         }, userData);
 
         // Add dependency update results if any
@@ -621,6 +625,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
       due_date: taskDueDateSchema,
       start_date: taskStartDateSchema,
       time_estimate: taskTimeEstimateSchema,
+      points: taskPointsSchema,
       tags: taskTagsSchema,
       parent_task_id: z.string().optional().describe("Optional parent task ID to create this as a subtask"),
       assignees: z.array(z.string()).optional().describe(createAssigneeDescription(userData))
@@ -631,7 +636,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
       idempotentHint: false,
       openWorldHint: true
     },
-    async ({ list_id, name, description, status, priority, due_date, start_date, time_estimate, tags, parent_task_id, assignees }: any) => {
+    async ({ list_id, name, description, status, priority, due_date, start_date, time_estimate, points, tags, parent_task_id, assignees }: any) => {
       try {
         // Resolve description images BEFORE creating the task: a broken reference
         // (missing file, dead URL, non-image) must not leave a half-finished task
@@ -646,7 +651,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
         const currentUserId = userData.user.id;
 
         const requestBody = buildTaskRequestBody({
-          name, status, priority, due_date, start_date, time_estimate, tags, assignees, parent_task_id
+          name, status, priority, due_date, start_date, time_estimate, points, tags, assignees, parent_task_id
         }, currentUserId);
 
         // Add markdown description if provided
@@ -731,7 +736,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
         }
 
         const responseLines = formatTaskResponse(createdTask, 'created', {
-          list_id, name, description, status, priority, due_date, start_date, time_estimate, tags, parent_task_id, assignees
+          list_id, name, description, status, priority, due_date, start_date, time_estimate, points, tags, parent_task_id, assignees
         }, userData);
 
         responseLines.push(...formatAttachedImages(uploaded));
@@ -949,9 +954,10 @@ function buildTaskRequestBody(params: {
   description?: string;
   status?: string;
   priority?: string;
-  due_date?: string;
-  start_date?: string;
-  time_estimate?: number;
+  due_date?: string | null;
+  start_date?: string | null;
+  time_estimate?: number | null;
+  points?: number | null;
   tags?: string[];
   assignees?: string[];
   parent_task_id?: string;
@@ -970,16 +976,22 @@ function buildTaskRequestBody(params: {
     requestBody.priority = convertPriorityToNumber(params.priority);
   }
 
+  // null clears the value - it must be sent as is, new Date(null) would set 1970-01-01.
+  // time_estimate is the exception: ClickUp accepts null but silently keeps the estimate, only 0 clears it.
   if (params.due_date !== undefined) {
-    requestBody.due_date = new Date(params.due_date).getTime();
+    requestBody.due_date = params.due_date === null ? null : new Date(params.due_date).getTime();
   }
 
   if (params.start_date !== undefined) {
-    requestBody.start_date = new Date(params.start_date).getTime();
+    requestBody.start_date = params.start_date === null ? null : new Date(params.start_date).getTime();
   }
 
   if (params.time_estimate !== undefined) {
-    requestBody.time_estimate = Math.round(params.time_estimate * 60 * 60 * 1000);
+    requestBody.time_estimate = params.time_estimate === null ? 0 : Math.round(params.time_estimate * 60 * 60 * 1000);
+  }
+
+  if (params.points !== undefined) {
+    requestBody.points = params.points;
   }
 
   // Tags are handled separately via dedicated API endpoints
@@ -1138,16 +1150,24 @@ function formatTaskResponse(task: any, operation: 'created' | 'updated', params:
     responseLines.push(`priority: ${priority}`);
   }
 
+  if (params.remove_assignees !== undefined && params.remove_assignees.length > 0) {
+    responseLines.push(`removed_assignees: ${params.remove_assignees.join(', ')}`);
+  }
+
   if (params.due_date !== undefined) {
-    responseLines.push(`due_date: ${params.due_date}`);
+    responseLines.push(`due_date: ${params.due_date ?? 'cleared'}`);
   }
 
   if (params.start_date !== undefined) {
-    responseLines.push(`start_date: ${params.start_date}`);
+    responseLines.push(`start_date: ${params.start_date ?? 'cleared'}`);
   }
 
   if (params.time_estimate !== undefined) {
-    responseLines.push(`time_estimate: ${formatTimeEstimate(params.time_estimate)}`);
+    responseLines.push(`time_estimate: ${params.time_estimate === null ? 'cleared' : formatTimeEstimate(params.time_estimate)}`);
+  }
+
+  if (params.points !== undefined) {
+    responseLines.push(`points: ${params.points === null ? 'cleared' : task.points ?? params.points}`);
   }
 
   if (params.tags !== undefined && params.tags.length > 0) {
