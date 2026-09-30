@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.1] - 2026-09-30
+
+### Fixed
+- **Blank lines between paragraphs are kept in comments.** remark drops the blank line separating two markdown blocks, and the converter only emitted a single line break after each paragraph (none after a list), so `addComment` and `editComment` glued paragraphs and lists into one dense block. An empty line fragment is now emitted wherever the source has a blank line between two blocks; several blank lines collapse into one, and a list written directly under its intro line stays attached to it.
+
 ## [1.8.0] - 2026-08-17
 
 ### Added
