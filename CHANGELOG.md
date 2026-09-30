@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.9.0] - 2026-09-30
 
 ### Added
 - **Sprint points** - `createTask` and `updateTask` accept an optional `points` parameter (non-negative number) mapped to ClickUp's `points` task field. `getTaskById` now shows the task's sprint points when set. Requires the Sprint Points ClickApp to be enabled on the space. Valid values depend on the points scale each workspace configures, so they are not validated locally - ClickUp rejects anything off the scale with `not a valid points selection`.
