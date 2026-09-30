@@ -129,24 +129,31 @@ export function registerListToolsWrite(server: McpServer) {
   tool(
     "updateListInfo",
     [
-      "Appends documentation or context to a list's description.",
+      "Appends to or replaces a list's description.",
       "ALWAYS reference the list URL (https://app.clickup.com/v/l/LIST_ID) when updating or discussing lists.",
-      "SAFETY FEATURE: Description updates are APPEND-ONLY to prevent data loss - existing content is preserved.",
+      "`append_description` adds a dated block under the existing description and is the safe default. `replace_description` rewrites the whole description - read it with getListInfo first and repeat everything worth keeping; the previous description is echoed back so it can be restored.",
       "Use this to add project context, requirements, or guidelines that LLMs should consider when working with tasks in this list.",
       "Include links to related tasks, spaces, or external resources in the appended content.",
       "Content is appended in markdown format with timestamp for tracking changes."
     ].join("\n"),
     {
       list_id: z.string().min(1).describe("The list ID to update"),
-      append_description: z.string().min(1).describe("Markdown content to APPEND to existing list description (preserves existing content for safety)")
+      append_description: z.string().min(1).optional().describe("Markdown content to APPEND under the existing list description as a dated block (preserves existing content). Mutually exclusive with replace_description"),
+      replace_description: z.string().optional().describe("Markdown content that REPLACES the whole list description. Anything not repeated here is lost (the previous description is echoed back). Mutually exclusive with append_description")
     },
     {
       readOnlyHint: false,
-      destructiveHint: false,
+      destructiveHint: true,
       idempotentHint: false,
     },
-    async ({ list_id, append_description }: any) => {
+    async ({ list_id, append_description, replace_description }: any) => {
       try {
+        if ((append_description === undefined) === (replace_description === undefined)) {
+          return {
+            content: [{ type: "text", text: "Pass either append_description or replace_description (exactly one). The list was NOT updated." }],
+          };
+        }
+
         // Get current list info including description (try to get markdown content)
         const listResponse = await fetch(`https://api.clickup.com/api/v2/list/${list_id}?include_markdown_description=true`, {
           headers: { Authorization: CONFIG.apiKey },
@@ -158,11 +165,16 @@ export function registerListToolsWrite(server: McpServer) {
 
         const listData = await listResponse.json();
 
-        // Handle append-only description update with markdown support
+        // Append adds a dated block under the current description; replace sends the new text as is
         const currentDescription = listData.markdown_description || listData.markdown_content || listData.content || "";
         const timestamp = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
-        const separator = currentDescription.trim() ? "\n\n---\n" : "";
-        const finalDescription = currentDescription + separator + `**Edit (${timestamp}):** ${append_description}`;
+        let finalDescription: string;
+        if (replace_description !== undefined) {
+          finalDescription = replace_description;
+        } else {
+          const separator = currentDescription.trim() ? "\n\n---\n" : "";
+          finalDescription = currentDescription + separator + `**Edit (${timestamp}):** ${append_description}`;
+        }
 
         // Update the list description using markdown_content
         const updateResponse = await fetch(`https://api.clickup.com/api/v2/list/${list_id}`, {
@@ -185,7 +197,12 @@ export function registerListToolsWrite(server: McpServer) {
           content: [
             {
               type: "text",
-              text: `Successfully appended content to list "${listData.name}". The new content has been added with timestamp (${timestamp}) while preserving existing description.`,
+              text: replace_description !== undefined
+                ? [
+                    `Successfully replaced the description of list "${listData.name}" (list_id: ${list_id}).`,
+                    `previous_description: ${currentDescription.trim() ? currentDescription : '(empty)'}`,
+                  ].join('\n')
+                : `Successfully appended content to list "${listData.name}" (list_id: ${list_id}). The new content has been added with timestamp (${timestamp}) while preserving existing description.`,
             },
           ],
         };

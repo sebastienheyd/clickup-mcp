@@ -47,8 +47,12 @@
       "description": "Replace the text of an own task comment within a configurable time window (default 24 hours) instead of posting a follow-up comment. Formatting and images are preserved; comments by other users and older comments are refused."
     },
     {
+      "name": "deleteComment",
+      "description": "Delete an own task comment within the same time window as editComment. The deleted text is echoed back; comments by other users and older comments are refused."
+    },
+    {
       "name": "updateTask",
-      "description": "Update various aspects of an existing task including name, description (append-only), status, priority, dates, tags, assignees, and parent relationships. Images in the appended description are uploaded and embedded automatically."
+      "description": "Update various aspects of an existing task including name, description (append a dated block or replace it entirely), status, priority, dates, tags, assignees, and parent relationships. Images in the appended description are uploaded and embedded automatically."
     },
     {
       "name": "createTask",
@@ -68,7 +72,7 @@
     },
     {
       "name": "updateListInfo",
-      "description": "Append documentation or context to a list's description (append-only for safety) with markdown support and timestamp tracking."
+      "description": "Append a dated block to a list's description or replace it entirely, with markdown support. The previous description is echoed back on replace."
     },
     {
       "name": "getTimeEntries",

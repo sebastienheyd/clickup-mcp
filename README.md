@@ -99,7 +99,7 @@ Turn natural language into powerful ClickUp actions:
 - Handle time estimates, sprint points and custom field values
 
 ### 🔒 **Safety Features**
-- **Append-Only Descriptions**: Description fields are never overwritten - new content is safely appended with timestamps
+- **Append-First Descriptions**: `append_description` adds a dated block under the existing description and is the default for notes. `replace_description` rewrites the whole description on purpose - the previous content is echoed back so a wrong replacement can be undone
 - **Normal Field Updates**: Status, priority, assignees, tags, and dates can be updated normally (easily revertible through ClickUp's history)
 
 ## Installation
@@ -191,12 +191,13 @@ The ClickUp MCP supports three operational modes to balance functionality, secur
 | `getTaskById`          |      ✅       |  ✅   |   ✅   | Get complete task details including comments, images, and metadata                      |
 | `addComment`           |      ❌       |  ❌   |   ✅   | Add comments to tasks for collaboration                                                 |
 | `editComment`          |      ❌       |  ❌   |   ✅   | Correct your own comment within 24h instead of posting a follow-up                      |
-| `updateTask`           |      ❌       |  ❌   |   ✅   | Update tasks (status, priority, assignees, etc.) with **SAFE APPEND-ONLY** descriptions |
+| `deleteComment`        |      ❌       |  ❌   |   ✅   | Delete your own comment within 24h (deleted text is echoed back)                        |
+| `updateTask`           |      ❌       |  ❌   |   ✅   | Update tasks (status, priority, assignees, etc.); append to or replace descriptions     |
 | `createTask`           |      ❌       |  ❌   |   ✅   | Create new tasks with full markdown support                                             |
 | `searchTasks`          |      ✅       |  ✅   |   ✅   | Find tasks by content, keywords, assignees, or project context                          |
 | `searchSpaces`         |      ❌       |  ✅   |   ✅   | Browse workspace structure, project organization, and documents                         |
 | `getListInfo`          |      ❌       |  ✅   |   ✅   | Get list details and available statuses for task creation                               |
-| `updateListInfo`       |      ❌       |  ❌   |   ✅   | **SAFE APPEND-ONLY** updates to list descriptions (preserves existing content)          |
+| `updateListInfo`       |      ❌       |  ❌   |   ✅   | Append to or replace list descriptions (previous content echoed back on replace)        |
 | `getTimeEntries`       |      ❌       |  ✅   |   ✅   | View time entries and analyze time spent across projects                                |
 | `createTimeEntry`      |      ❌       |  ❌   |   ✅   | Log time entries for task tracking                                                      |
 | `updateTimeEntry`      |      ❌       |  ❌   |   ✅   | Adjust your own time entries (duration, start, description, task)                       |
@@ -279,8 +280,8 @@ Create a task called "API Integration" with description:
 See related task: https://app.clickup.com/t/abc123
 ```
 
-**Append-Only Updates (Safe):**
-When updating task descriptions, content is safely appended:
+**Append or Replace Descriptions:**
+By default (`append_description`), content is appended under the existing description:
 ```markdown
 [Existing task description content]
 
@@ -290,7 +291,7 @@ When updating task descriptions, content is safely appended:
 - Performance requirement: < 2s load time
 ```
 
-This ensures no existing content is ever lost while maintaining a clear audit trail.
+This keeps existing content and a clear audit trail. To correct or restructure a description, `replace_description` rewrites it entirely; the tool answers with the previous description so nothing is silently lost. The same two parameters exist on `updateListInfo`.
 
 ## Writing Images Into Tickets
 

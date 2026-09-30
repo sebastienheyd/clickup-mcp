@@ -419,7 +419,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
         "Updates various aspects of an existing task including dependencies and relationships.",
         "ALWAYS include the task URL (https://app.clickup.com/t/TASK_ID) when updating or referencing tasks.",
         "Use getListInfo first to see valid status options.",
-        "SAFETY FEATURE: Description updates are APPEND-ONLY to prevent data loss - existing content is preserved.",
+        "DESCRIPTION: `append_description` adds a dated block under the existing description and is the safe default for notes. `replace_description` rewrites the whole description - use it to correct or restructure the specification. Read the current description with getTaskById first and repeat everything worth keeping; the previous description is echoed back so it can be restored with another call.",
         "STATUS UPDATES: Use the `addComment` tool for progress reports, work logs, and status updates rather than the task description.",
         IMAGE_SUPPORT_HINT,
         "Task descriptions should contain requirements, specifications, and core task information.",
@@ -440,7 +440,8 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
         message: "Must be an internal task ID (6+ alphanumeric characters) or a custom task ID (e.g. SOI-4422)"
       }).describe("The task ID to update: internal ID (e.g. \"869c4za0g\") or custom ID (e.g. \"SOI-4422\")"),
       name: taskNameSchema.optional(),
-      append_description: z.string().optional().describe("Optional markdown content to APPEND to existing task description (preserves existing content for safety)"),
+      append_description: z.string().optional().describe("Optional markdown content to APPEND under the existing task description as a dated block (preserves existing content). Mutually exclusive with replace_description"),
+      replace_description: z.string().optional().describe("Optional markdown content that REPLACES the whole task description. Anything not repeated here is lost (the previous description is echoed back in the response). Mutually exclusive with append_description"),
       status: z.string().optional().describe("Optional new status name - use getListInfo to see valid options"),
       priority: taskPrioritySchema,
       due_date: taskDueDateSchema.nullable().describe(taskDueDateSchema.description + CLEAR_HINT),
@@ -461,8 +462,14 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
       idempotentHint: false,
       openWorldHint: true
     },
-    async ({ task_id, name, append_description, status, priority, due_date, start_date, time_estimate, points, tags, parent_task_id, assignees, remove_assignees, blocking, waiting_on, linked_tasks }: any) => {
+    async ({ task_id, name, append_description, replace_description, status, priority, due_date, start_date, time_estimate, points, tags, parent_task_id, assignees, remove_assignees, blocking, waiting_on, linked_tasks }: any) => {
       try {
+        if (append_description !== undefined && replace_description !== undefined) {
+          return {
+            content: [{ type: "text" as const, text: "Pass either append_description or replace_description, not both. The task was NOT updated." }],
+          };
+        }
+
         // Resolve custom task ID to internal ID if needed
         const resolved_task_id = await resolveTaskId(task_id);
 
@@ -482,15 +489,18 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
         // Resolve and upload description images FIRST - an image problem must
         // abort before dependencies, tags or the task itself are touched, so the
         // caller can fix the markdown and retry the whole call cleanly.
-        let appendedDescription: string | undefined;
+        // Both description modes go through the same pipeline: only what is done
+        // with the prepared markdown differs (appended block vs whole description).
+        let preparedDescription: string | undefined;
         let uploadedImages: UploadedMarkdownImage[] = [];
-        if (append_description) {
+        const descriptionInput = replace_description !== undefined ? replace_description : append_description;
+        if (descriptionInput) {
           const abortNotice = "the task was NOT updated";
-          const prepared = await resolveImagesOrAbort(append_description, abortNotice);
+          const prepared = await resolveImagesOrAbort(descriptionInput, abortNotice);
           uploadedImages = await uploadImagesOrAbort(resolved_task_id, prepared.images, abortNotice);
           // Descriptions render plain markdown, so no image fragments are involved
           // here - the local paths are simply swapped for the CDN URLs.
-          appendedDescription = rewriteMarkdownImageUrls(
+          preparedDescription = rewriteMarkdownImageUrls(
             prepared.markdown,
             toAttachmentMap(uploadedImages)
           );
@@ -556,13 +566,16 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
           }
         }
 
-        // Handle append-only description update with markdown support
+        // Append adds a dated block under the current description; replace sends
+        // the prepared markdown as is. An empty replace_description clears it.
         let finalDescription: string | undefined;
-        if (appendedDescription !== undefined) {
-          const currentDescription = taskData.markdown_description || "";
+        const currentDescription = taskData.markdown_description || "";
+        if (replace_description !== undefined) {
+          finalDescription = preparedDescription ?? "";
+        } else if (preparedDescription !== undefined) {
           const timestamp = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
           const separator = currentDescription.trim() ? "\n\n---\n" : "";
-          finalDescription = currentDescription + separator + `**Edit (${timestamp}):** ${appendedDescription}`;
+          finalDescription = currentDescription + separator + `**Edit (${timestamp}):** ${preparedDescription}`;
         }
 
         // Build update body without tags (they're handled separately)
@@ -625,6 +638,11 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
         const responseLines = formatTaskResponse(updatedTask, 'updated', {
           name, append_description, status, priority, due_date, start_date, time_estimate, points, tags, parent_task_id, assignees, remove_assignees, blocking, waiting_on, linked_tasks
         }, userData);
+
+        // Echo what was overwritten so a wrong replacement can be undone with another call
+        if (replace_description !== undefined) {
+          responseLines.push(`previous_description: ${currentDescription.trim() ? currentDescription : '(empty)'}`);
+        }
 
         // Add dependency update results if any
         if (dependencyUpdateResults.length > 0) {
