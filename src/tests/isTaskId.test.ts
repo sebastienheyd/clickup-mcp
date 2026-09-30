@@ -32,3 +32,10 @@ test("isCustomTaskId recognises prefixed custom IDs", async () => {
   assert.equal(isCustomTaskId("follow-up"), false);
   assert.equal(isCustomTaskId("869c4za0g"), false);
 });
+
+test("isTaskId accepts up to 16 characters and rejects longer strings", async () => {
+  const { isTaskId } = await import("../shared/utils");
+  assert.equal(isTaskId("a".repeat(16)), true);
+  assert.equal(isTaskId("a".repeat(17)), false, "17+ characters are URLs or garbage, not task IDs");
+  assert.equal(isTaskId("https://app.clickup.com/t/869f9u4nh"), false);
+});

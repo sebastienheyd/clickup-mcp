@@ -6,11 +6,11 @@ const GLOBAL_REFRESH_INTERVAL = 60000; // 60 seconds - that is the rate limit ti
 /**
  * Checks if a string looks like a valid ClickUp task ID
  * Valid task IDs are at least 6 characters long and contain only alphanumeric characters.
- * No upper bound: ClickUp now issues IDs of 10+ characters (e.g. "wdrv93ebwx").
+ * 6-16 characters: ClickUp lengthened generated IDs in August 2026 (9 -> 10 -> 11 chars); 16 leaves headroom while still rejecting URLs and "CU-" prefixed strings before an API call.
  */
 export function isTaskId(str: string): boolean {
-  // Task IDs are 6+ characters long and contain only alphanumeric characters
-  return /^[a-z0-9]{6,}$/i.test(str);
+  // Task IDs are 6-16 characters long and contain only alphanumeric characters
+  return /^[a-z0-9]{6,16}$/i.test(str);
 }
 
 /**

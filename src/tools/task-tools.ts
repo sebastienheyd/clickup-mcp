@@ -3,8 +3,9 @@ import { z } from "zod";
 import { convertMarkdownToToolCallResult, convertClickUpTextItemsToToolCallResult } from "../clickup-text";
 import { ContentBlock, DatedContentEvent, ImageMetadataBlock } from "../shared/types";
 import { CONFIG } from "../shared/config";
-import { isTaskId, isCustomTaskId, resolveTaskId, getSpaceDetails, getAllTeamMembers } from "../shared/utils";
+import { isTaskId, getSpaceDetails, getAllTeamMembers } from "../shared/utils";
 import { downloadImages } from "../shared/image-processing";
+import { ExistingComment, fetchAllTopLevelComments, fetchRepliesByComment } from "../shared/comments";
 
 // Read-specific utility functions
 
@@ -22,26 +23,24 @@ export function registerTaskToolsRead(server: McpServer, userData: any) {
     {
       id: z
         .string()
-        .min(1)
-        .refine(val => isTaskId(val) || isCustomTaskId(val), {
-          message: "Must be an internal task ID (6+ alphanumeric characters) or a custom task ID (e.g. SOI-4422)"
+        .min(6)
+        .max(16)
+        .refine(val => isTaskId(val), {
+          message: "Task ID must be 6-16 alphanumeric characters only"
         })
         .describe(
-          `The task ID: either an internal ID (6+ alphanumeric characters like "869c4za0g") or a custom task ID (e.g. "SOI-4422"). Do not include prefixes like "#", "CU-" or URLs.`
+          `The 6-16 character ID of the task to get without a prefix like "#", "CU-" or "https://app.clickup.com/t/"`
         ),
     },
     {
       readOnlyHint: true
     },
     async ({ id }: any) => {
-      // Resolve custom task ID to internal ID if needed
-      const resolvedId = await resolveTaskId(id);
-
       // 1. Load base task content, comment events, and status change events in parallel
       const [taskDetailContentBlocks, commentEvents, statusChangeEvents] = await Promise.all([
-        loadTaskContent(resolvedId), // Returns Promise<ContentBlock[]>
-        loadTaskComments(resolvedId), // Returns Promise<DatedContentEvent[]>
-        loadTimeInStatusHistory(resolvedId), // Returns Promise<DatedContentEvent[]>
+        loadTaskContent(id), // Returns Promise<ContentBlock[]>
+        loadTaskComments(id), // Returns Promise<DatedContentEvent[]>
+        loadTimeInStatusHistory(id), // Returns Promise<DatedContentEvent[]>
       ]);
 
       // 2. Combine comment and status change events
@@ -132,31 +131,59 @@ async function loadTaskContent(taskId: string): Promise<(ContentBlock | ImageMet
 }
 
 async function loadTaskComments(id: string): Promise<DatedContentEvent[]> {
-  const response = await fetch(
-    `https://api.clickup.com/api/v2/task/${id}/comment?start_date=0`, // Ensure all comments are fetched
-    { headers: { Authorization: CONFIG.apiKey } }
-  );
-  if (!response.ok) {
-    console.error(`Error fetching comments for task ${id}: ${response.status} ${response.statusText}`);
+  let comments: ExistingComment[];
+  try {
+    // The comment list only returns 25 top-level comments per page - page through
+    // all of them (the previous `?start_date=0` was silently ignored by ClickUp).
+    comments = await fetchAllTopLevelComments(id);
+  } catch (error) {
+    console.error(`Error fetching comments for task ${id}:`, error);
     return [];
   }
-  const commentsData = await response.json();
-  if (!commentsData.comments || !Array.isArray(commentsData.comments)) {
-    console.error(`Unexpected comment data structure for task ${id}`);
-    return [];
-  }
+
+  // Replies live behind their own endpoint and are missing from the comment
+  // list. Only threads (reply_count > 0) cost extra requests, bounded in count
+  // and concurrency to protect the API budget.
+  const repliesByComment = await fetchRepliesByComment(comments);
+
+  const formatUser = (user: ExistingComment["user"]) =>
+    `${user?.username ?? "unknown"} (user_id: ${user?.id ?? "unknown"})`;
+
   const commentEvents: DatedContentEvent[] = await Promise.all(
-    commentsData.comments.map(async (comment: any) => {
+    comments.map(async (comment) => {
+      // The comment_id makes the comment addressable for editComment and for
+      // threaded replies via addComment's parent_comment_id.
       const headerBlock: ContentBlock = {
         type: "text",
-        text: `Comment by ${comment.user.username} on ${timestampToIso(comment.date)}:`,
+        text: `Comment by ${formatUser(comment.user)} on ${timestampToIso(comment.date)} (comment_id: ${comment.id}):`,
       };
 
-      const commentBodyBlocks: (ContentBlock | ImageMetadataBlock)[] = await convertClickUpTextItemsToToolCallResult(comment.comment);
+      const commentBodyBlocks: (ContentBlock | ImageMetadataBlock)[] = await convertClickUpTextItemsToToolCallResult(comment.comment ?? []);
+      const contentBlocks: (ContentBlock | ImageMetadataBlock)[] = [headerBlock, ...commentBodyBlocks];
+
+      const replyCount = comment.reply_count ?? 0;
+      if (replyCount > 0) {
+        const replies = repliesByComment.get(String(comment.id)) ?? [];
+        for (const reply of replies) {
+          contentBlocks.push({
+            type: "text",
+            text: `↳ Reply by ${formatUser(reply.user)} on ${timestampToIso(reply.date)} (comment_id: ${reply.id}):`,
+          });
+          contentBlocks.push(...await convertClickUpTextItemsToToolCallResult(reply.comment ?? []));
+        }
+        if (replies.length === 0) {
+          // The thread exists (reply_count says so) but its replies were skipped
+          // over the budget cap or failed to load - never pretend it is empty.
+          contentBlocks.push({
+            type: "text",
+            text: `↳ This comment has ${replyCount} repl${replyCount === 1 ? "y" : "ies"} that could not be loaded.`,
+          });
+        }
+      }
 
       return {
         date: comment.date, // String timestamp from ClickUp for sorting
-        contentBlocks: [headerBlock, ...commentBodyBlocks],
+        contentBlocks,
       };
     })
   );
@@ -367,6 +394,35 @@ export async function generateTaskMetadata(task: any, timeEntries?: any[], isDet
     metadataLines.push(`child_task_ids: ${task.subtasks.map((st: any) => st.id).join(', ')}`);
   }
 
+  // Add dependencies if they exist. The API returns a single flat `dependencies`
+  // array for both directions; which side of the pair this task sits on decides
+  // whether it is waiting on the other task or blocking it.
+  if (task.dependencies && task.dependencies.length > 0) {
+    const waitingOn = task.dependencies
+      .filter((dep: any) => dep.task_id === task.id)
+      .map((dep: any) => dep.depends_on);
+    const blocking = task.dependencies
+      .filter((dep: any) => dep.depends_on === task.id)
+      .map((dep: any) => dep.task_id);
+
+    if (waitingOn.length > 0) {
+      metadataLines.push(`waiting_on: ${waitingOn.join(', ')}`);
+    }
+    if (blocking.length > 0) {
+      metadataLines.push(`blocking: ${blocking.join(', ')}`);
+    }
+  }
+
+  // Add linked (related, non-blocking) tasks if they exist
+  if (task.linked_tasks && task.linked_tasks.length > 0) {
+    const linked = task.linked_tasks
+      .map((link: any) => (link.task_id === task.id ? link.link_id : link.task_id))
+      .filter((id: any) => id);
+
+    if (linked.length > 0) {
+      metadataLines.push(`linked_tasks: ${linked.join(', ')}`);
+    }
+  }
 
   // Add archived status if true
   if (task.archived) {

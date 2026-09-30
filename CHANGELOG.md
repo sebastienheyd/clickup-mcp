@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Merged upstream [hauptsacheNet/clickup-mcp](https://github.com/hauptsacheNet/clickup-mcp) 1.9.0.** The fork now carries the upstream history, so future upstream releases merge incrementally instead of being copied commit by commit.
+- **`replace_description` is renamed `description`** on `updateTask` and `updateListInfo`, matching the upstream parameter name. Behaviour is unchanged: mutually exclusive with `append_description`, the previous description is echoed back, an empty string clears the description.
+- Task IDs are bounded to 6-16 characters again (upstream 1.7.3): ClickUp lengthened generated IDs in August 2026, and the bound is what rejects task URLs before they cost an API call.
+
+### Added (from upstream)
+- `getTaskById` renders threaded comment replies under their parent, shows each top-level `comment_id`, lists `waiting_on` / `blocking` / `linked_tasks`, and pages comment history beyond the 25 newest.
+- `addComment` accepts `parent_comment_id` to reply inside a thread.
+- Comments support markdown tables (rendered as aligned pipe tables in a code block, since ClickUp cannot render tables), `~~strikethrough~~` and multi-line code blocks, in both directions.
+- `updateTask` can actually remove task links via `linked_tasks` (link records are identified by their far end).
+- `CLICKUP_COMMENT_EDIT_WINDOW_HOURS` and `MAX_UPLOAD_SIZE_MB` are exposed as MCPB installer fields; blank or unsubstituted values fall back to the defaults, invalid numbers fail at startup.
+
 ## [1.9.0] - 2026-09-30
 
 ### Added

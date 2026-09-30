@@ -148,30 +148,72 @@ test("convertMarkdownToClickUpBlocks handles mixed nested lists", () => {
   assert.ok(deepBullet, "should have nested bullet inside numbered list");
 });
 
-test("convertMarkdownToClickUpBlocks keeps blank lines between paragraphs", () => {
-  const markdown = "First paragraph.\n\nSecond paragraph.";
+test("convertMarkdownToClickUpBlocks maps strikethrough to strike attribute", () => {
+  const markdown = "This is ~~gone~~ now.";
   const blocks = convertMarkdownToClickUpBlocks(markdown);
 
-  const text = blocks.map(b => b.text).join("");
-  assert.equal(text, "First paragraph.\n\nSecond paragraph.");
+  const strike = blocks.find(b => b.attributes?.strike === true);
+  assert.ok(strike, "should have strike block");
+  assert.equal(strike?.text, "gone");
 });
 
-test("convertMarkdownToClickUpBlocks keeps a blank line after a list", () => {
-  const markdown = "Delivered:\n- item one\n- item two\n\nClosing paragraph.";
+test("convertMarkdownToClickUpBlocks renders tables as aligned code blocks", () => {
+  const markdown = [
+    "Before the table.",
+    "",
+    "| Col A | Column B |",
+    "|-------|----------|",
+    "| a1    | b1 with **bold** |",
+    "| a2    | b2 |",
+    "",
+    "After the table.",
+  ].join("\n");
+
   const blocks = convertMarkdownToClickUpBlocks(markdown);
 
-  const text = blocks.map(b => b.text).join("");
-  // No blank line between the intro and the list: none in the source either
-  assert.equal(text, "Delivered:\nitem one\nitem two\n\nClosing paragraph.");
+  // The table must end up inside a code block, not vanish. Quill applies block
+  // attributes per line, so every table row must be followed by its own '\n'
+  // fragment carrying the code-block attribute.
+  const codeBlockMarkers = blocks.filter(b => b.text === '\n' && b.attributes?.['code-block'] !== undefined);
+  assert.equal(codeBlockMarkers.length, 4, "each table line needs its own code-block newline (header + separator + 2 rows)");
 
-  const lastItem = blocks.map(b => !!b.attributes?.list).lastIndexOf(true);
-  const blank = blocks[lastItem + 1];
-  assert.deepEqual(blank, { text: "\n", attributes: {} }, "the blank line must not carry list formatting");
+  const allText = blocks.map(b => b.text ?? '').join('');
+  assert.ok(allText.includes('Col A'), "table cell content must survive");
+  assert.ok(allText.includes('| a1'), "row content must survive");
+  assert.ok(allText.includes('**bold**'), "inline formatting is kept literally");
+
+  // Surrounding paragraphs stay intact
+  assert.ok(blocks.some(b => b.text === 'Before the table.'), "text before table survives");
+  assert.ok(blocks.some(b => b.text === 'After the table.'), "text after table survives");
 });
 
-test("convertMarkdownToClickUpBlocks collapses several blank lines into one", () => {
-  const markdown = "First.\n\n\n\nSecond.";
-  const blocks = convertMarkdownToClickUpBlocks(markdown);
+test("convertMarkdownToClickUpBlocks separates paragraphs with an empty line", () => {
+  // ClickUp has no paragraph margins - the UI stores a paragraph break as an
+  // extra empty '\n' fragment. A single '\n' renders both paragraphs as one block.
+  const blocks = convertMarkdownToClickUpBlocks("First paragraph.\n\nSecond paragraph.");
+  const texts = blocks.map(b => b.text);
+  assert.deepEqual(texts, ["First paragraph.", "\n", "\n", "Second paragraph."]);
+});
 
-  assert.equal(blocks.map(b => b.text).join(""), "First.\n\nSecond.");
+test("convertMarkdownToClickUpBlocks keeps a hard line break as a single newline", () => {
+  const blocks = convertMarkdownToClickUpBlocks("Line one  \nLine two");
+  const texts = blocks.map(b => b.text);
+  assert.deepEqual(texts, ["Line one", "\n", "Line two"]);
+});
+
+test("convertMarkdownToClickUpBlocks puts an empty line between a list and a paragraph", () => {
+  const blocks = convertMarkdownToClickUpBlocks("Intro.\n\n- item\n\nOutro.");
+  const texts = blocks.map(b => b.text);
+  assert.deepEqual(texts, ["Intro.", "\n", "\n", "item", "\n", "\n", "Outro."]);
+  // the list marker must stay on the list line, the blank line is plain
+  assert.deepEqual(blocks[4].attributes, { list: { list: "bullet" } });
+  assert.deepEqual(blocks[5].attributes, {});
+});
+
+test("convertMarkdownToClickUpBlocks adds no empty line around headings, code blocks and quotes", () => {
+  const markdown = "Para.\n\n## Title\n\nPara.\n\n```\ncode\n```\n\nPara.\n\n> quote\n\nPara.";
+  const blocks = convertMarkdownToClickUpBlocks(markdown);
+  const plainNewlines = blocks.filter(b => b.text === "\n" && Object.keys(b.attributes ?? {}).length === 0);
+  // one plain newline terminating each non-final paragraph, none as extra blank lines
+  assert.equal(plainNewlines.length, 3);
 });

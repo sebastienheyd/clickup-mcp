@@ -101,3 +101,72 @@ test("a comment read back as markdown keeps its image when passed to editComment
   t.mock.timers.runAll();
   t.mock.timers.reset();
 });
+
+test("strike attribute reads back as ~~markdown~~ and re-converts to strike", async () => {
+  const { convertMarkdownToClickUpBlocks } = await import("../clickup-text");
+
+  // 1. Read: fragments as ClickUp returns them for struck-through text
+  const blocks = await convertClickUpTextItemsToToolCallResult([
+    { text: "This is " },
+    { text: "obsolete", attributes: { strike: true } },
+    { text: " now.\n" },
+  ]);
+
+  const text = blocks
+    .filter((b): b is { type: "text"; text: string } => b.type === "text")
+    .map((b) => b.text)
+    .join("\n");
+  assert.equal(text, "This is ~~obsolete~~ now.");
+
+  // 2. Write the read-back text again: strike must survive the round trip
+  const written = convertMarkdownToClickUpBlocks(text);
+  const strike = written.find((b) => b.attributes?.strike === true);
+  assert.ok(strike, "strike attribute must be regenerated on write");
+  assert.equal(strike?.text, "obsolete");
+});
+
+test("code-block language survives the read/write round trip", async () => {
+  const { convertMarkdownToClickUpBlocks } = await import("../clickup-text");
+
+  // 1. Read: two code lines in a ts block, as ClickUp returns them (one
+  //    attributed '\n' fragment per line)
+  const blocks = await convertClickUpTextItemsToToolCallResult([
+    { text: "const a = 1;" },
+    { text: "\n", attributes: { "code-block": { "code-block": "ts" } } },
+    { text: "const b = 2;" },
+    { text: "\n", attributes: { "code-block": { "code-block": "ts" } } },
+    { text: "Done.\n" },
+  ]);
+
+  const text = blocks
+    .filter((b): b is { type: "text"; text: string } => b.type === "text")
+    .map((b) => b.text)
+    .join("\n");
+  assert.equal(text, "```ts\nconst a = 1;\nconst b = 2;\n```\nDone.");
+
+  // 2. Write the read-back text again: the language must reach ClickUp
+  const written = convertMarkdownToClickUpBlocks(text);
+  const marker = written.find((b) => b.attributes?.["code-block"] !== undefined);
+  assert.deepEqual(marker?.attributes?.["code-block"], { "code-block": "ts" });
+});
+
+test("paragraph breaks survive the full read/write round trip", async () => {
+  const { convertMarkdownToClickUpBlocks } = await import("../clickup-text");
+  const markdown = "First paragraph.\n\nSecond paragraph.\n\n- item\n\nAfter the list.";
+
+  // 1. Write: markdown -> fragments, with the empty '\n' fragment ClickUp uses
+  //    for a paragraph break (what pressing Enter twice stores)
+  const written = convertMarkdownToClickUpBlocks(markdown);
+
+  // 2. Read the exact fragments back the way getTaskById renders a comment
+  const read = await convertClickUpTextItemsToToolCallResult(written as any);
+  const text = read
+    .filter((b): b is { type: "text"; text: string } => b.type === "text")
+    .map((b) => b.text)
+    .join("\n");
+  assert.equal(text, markdown, "read-back markdown must equal the original");
+
+  // 3. Write the read-back text again: fragments must be identical, so a comment
+  //    fed through getTaskById -> editComment neither gains nor loses blank lines
+  assert.deepEqual(convertMarkdownToClickUpBlocks(text), written);
+});

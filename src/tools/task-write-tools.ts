@@ -15,11 +15,27 @@ import {
   toAttachmentMap,
   uploadResolvedImages,
 } from "../shared/attachments";
+import {
+  CommentPageCursor,
+  ExistingComment,
+  MAX_COMMENT_PAGES,
+  fetchCommentPage,
+  findTopLevelComment,
+} from "../shared/comments";
 
 /**
  * Shared wording for the image support of every markdown field in this file.
  * Kept in one place so the tools stay consistent about what a client may pass.
  */
+/**
+ * Shared wording for what markdown ClickUp comments can actually render.
+ * Kept in one place so addComment and editComment stay consistent.
+ */
+const COMMENT_FORMATTING_HINT = [
+  "FORMATTING: Headings, **bold**, *italic*, ~~strikethrough~~, `inline code`, code blocks, links, blockquotes, bullet/numbered/nested lists and checkboxes (- [ ] / - [x]) all render natively.",
+  "TABLES ARE NOT SUPPORTED by ClickUp comments - a markdown table is automatically converted to a monospace code block, which is readable but plain. Prefer bold labels or lists over tables when writing comments.",
+].join("\n");
+
 const IMAGE_SUPPORT_HINT = [
   "IMAGES: Reference images with normal markdown - `![caption](/absolute/path/to/screenshot.png)`.",
   "This server runs locally, so a local file path is read and uploaded automatically - never inline a screenshot as base64 when a path exists, it costs orders of magnitude more tokens.",
@@ -130,8 +146,11 @@ const taskPrioritySchema = z.enum(["urgent", "high", "normal", "low"]).optional(
 const taskDueDateSchema = z.string().optional().describe("Optional due date as ISO date string (e.g., '2024-10-06T23:59:59+02:00')");
 const taskStartDateSchema = z.string().optional().describe("Optional start date as ISO date string (e.g., '2024-10-06T09:00:00+02:00')");
 const taskTimeEstimateSchema = z.number().optional().describe("Optional time estimate in hours (will be converted to milliseconds)");
-const taskPointsSchema = z.number().nonnegative().optional().describe("Optional sprint points - requires the Sprint Points ClickApp on the space. Valid values depend on the points scale configured in that workspace: ClickUp rejects any other value with 'not a valid points selection'");
 const taskTagsSchema = z.array(z.string()).optional().describe("Optional array of tag names");
+const taskPointsSchema = z.number().nonnegative().optional().describe("Optional sprint points - requires the Sprint Points ClickApp on the space. Valid values depend on the points scale configured in that workspace: ClickUp rejects any other value with 'not a valid points selection'");
+const taskIdSchema = z.string().min(1).refine(val => isTaskId(val) || isCustomTaskId(val), {
+  message: "Must be an internal task ID (6-16 alphanumeric characters) or a custom task ID (e.g. SOI-4422)"
+});
 const CLEAR_HINT = " - pass null to clear the current value";
 
 export function registerTaskToolsWrite(server: McpServer, userData: any) {
@@ -142,13 +161,14 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
     "addComment",
     (() => {
       const descriptionBase = [
-        "Adds a comment to a specific task.",
+        "Adds a comment to a specific task, or a threaded reply to an existing comment when `parent_comment_id` is set.",
         "LINKING BEST PRACTICES:",
         "- Always reference related tasks using ClickUp URLs (https://app.clickup.com/t/TASK_ID)",
         "- Task URLs become live task references (chip with task name and status), so write them bare - any custom link text on a task URL is replaced by the live task name",
         "- Include task links when mentioning dependencies, related work, or follow-ups",
         "- Link to relevant lists, spaces, or other ClickUp entities when applicable",
         "PROGRESS UPDATES: Include current status, progress information, and next steps.",
+        COMMENT_FORMATTING_HINT,
         IMAGE_SUPPORT_HINT,
         "IMAGE LAYOUT: An image inside a numbered list breaks ClickUp's numbering. Write walkthrough steps as bold lines with a blank line before and after the image instead (`**1. Open the login page**`).",
         "If external links are provided, verify they are publicly accessible and incorporate relevant information.",
@@ -163,20 +183,37 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
       return descriptionBase.join("\n");
     })(),
     {
-      task_id: z.string().min(1).refine(val => isTaskId(val) || isCustomTaskId(val), {
-        message: "Must be an internal task ID (6+ alphanumeric characters) or a custom task ID (e.g. SOI-4422)"
-      }).describe("The task ID to comment on: internal ID (e.g. \"869c4za0g\") or custom ID (e.g. \"SOI-4422\")"),
+      task_id: taskIdSchema.describe("The task ID to comment on: internal ID (e.g. \"869c4za0g\") or custom ID (e.g. \"SOI-4422\")"),
       comment: z.string().min(1).describe("The comment text to add to the task"),
+      parent_comment_id: z.string().min(1).optional().describe(
+        "Optional: reply inside an existing comment thread instead of posting a new top-level comment. Pass the comment_id of a TOP-LEVEL comment as returned by getTaskById or addComment - ClickUp threads are one level deep, so a reply cannot have replies of its own."
+      ),
     },
     {
       readOnlyHint: false,
       destructiveHint: false,
       idempotentHint: false,
     },
-    async ({ task_id, comment }: any) => {
+    async ({ task_id, comment, parent_comment_id }: any) => {
       try {
-        // Resolve custom task ID to internal ID if needed
-        const resolved_task_id = await resolveTaskId(task_id);
+        // Resolve custom task IDs (e.g. "SOI-4422") to internal IDs
+        task_id = await resolveTaskId(task_id);
+
+        // The reply endpoint anchors the reply to the parent comment's task and
+        // ignores task_id, while images below are uploaded to task_id - so the
+        // parent must verifiably be a top-level comment of THIS task before
+        // anything is written. This also rejects reply ids (nested replies are
+        // not supported by ClickUp's one-level threads).
+        if (parent_comment_id) {
+          const parent = await findTopLevelComment(task_id, parent_comment_id);
+          if (!parent) {
+            throw new Error(
+              `Comment ${parent_comment_id} is not a top-level comment of task ${task_id}, so no reply was posted. ` +
+              `parent_comment_id must be the comment_id of a top-level comment of this task as returned by getTaskById - ` +
+              `a reply's id or a comment of another task cannot be used.`
+            );
+          }
+        }
 
         // Resolve and upload referenced images first - the fragments need the
         // attachment objects from the upload response, a bare URL renders as an
@@ -184,7 +221,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
         // the caller can fix the markdown and retry without creating duplicates.
         const abortNotice = "the comment was NOT posted";
         const { markdown, images } = await resolveImagesOrAbort(comment, abortNotice);
-        const uploaded = await uploadImagesOrAbort(resolved_task_id, images, abortNotice);
+        const uploaded = await uploadImagesOrAbort(task_id, images, abortNotice);
 
         // Convert markdown to ClickUp formatted blocks
         const commentBlocks = convertMarkdownToClickUpBlocks(markdown, toAttachmentMap(uploaded));
@@ -194,7 +231,13 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
           notify_all: true
         };
 
-        const response = await fetch(`https://api.clickup.com/api/v2/task/${resolved_task_id}/comment`, {
+        // A threaded reply goes to the parent comment's reply endpoint; the body
+        // is identical to a top-level comment.
+        const url = parent_comment_id
+          ? `https://api.clickup.com/api/v2/comment/${parent_comment_id}/reply`
+          : `https://api.clickup.com/api/v2/task/${task_id}/comment`;
+
+        const response = await fetch(url, {
           method: 'POST',
           headers: {
             Authorization: CONFIG.apiKey,
@@ -215,9 +258,13 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
             {
               type: "text" as const,
               text: [
-                `Comment added successfully!`,
+                parent_comment_id ? `Reply added successfully!` : `Comment added successfully!`,
                 `comment_id: ${commentData.id || 'N/A'}`,
-                `task_id: ${resolved_task_id}`,
+                ...(parent_comment_id ? [
+                  `parent_comment_id: ${parent_comment_id}`,
+                  `note: ClickUp threads are one level deep - a reply's comment_id cannot be used as parent_comment_id or with editComment.`,
+                ] : []),
+                `task_id: ${task_id}`,
                 `comment: ${summarizeMarkdownForEcho(comment)}`,
                 `date: ${timestampToIso(commentData.date || Date.now())}`,
                 `user: ${commentData.user?.username || 'Current user'}`,
@@ -250,6 +297,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
         `GUARDRAILS: only comments written by the API token's own user can be edited, and only within ${CONFIG.commentEditWindowHours} hours of their creation. Older comments and other people's comments must be answered with a new comment via addComment.`,
         "ClickUp shows no 'edited' marker, so people who already read the comment will not notice the change - for anything that changes meaning after a discussion has started, prefer a follow-up comment.",
         "Editing does not reset the creation date, so the edit window does not get extended by editing.",
+        COMMENT_FORMATTING_HINT,
         IMAGE_SUPPORT_HINT,
         "IMAGES ON EDIT: reading a comment (getTaskById) returns its images as markdown, so passing that text back keeps them - an existing ClickUp attachment URL is re-embedded without uploading again. Only an image whose markdown you drop disappears.",
         "Task URLs (https://app.clickup.com/t/TASK_ID) become live task references, and existing references are read back as such URLs - passing the text back keeps them.",
@@ -263,10 +311,8 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
       return descriptionBase.join("\n");
     })(),
     {
-      task_id: z.string().min(1).refine(val => isTaskId(val) || isCustomTaskId(val), {
-        message: "Must be an internal task ID (6+ alphanumeric characters) or a custom task ID (e.g. SOI-4422)"
-      }).describe("The ID of the task the comment belongs to - needed to locate the comment and to upload images. Internal ID (e.g. \"869c4za0g\") or custom ID (e.g. \"SOI-4422\")"),
-      comment_id: z.string().min(1).describe("The ID of the comment to edit, as returned by addComment or getTaskById"),
+      task_id: taskIdSchema.describe("The ID of the task the comment belongs to - needed to locate the comment and to upload images: internal ID (e.g. \"869c4za0g\") or custom ID (e.g. \"SOI-4422\")"),
+      comment_id: z.string().min(1).describe("The ID of the comment to edit, as returned by addComment or getTaskById. Only top-level comments can be edited - replies inside a thread cannot."),
       comment: z.string().min(1).describe("The new comment text, replacing the previous text completely"),
     },
     {
@@ -276,11 +322,11 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
     },
     async ({ task_id, comment_id, comment }: any) => {
       try {
-        // Resolve custom task ID to internal ID if needed
-        const resolved_task_id = await resolveTaskId(task_id);
+        // Resolve custom task IDs (e.g. "SOI-4422") to internal IDs
+        task_id = await resolveTaskId(task_id);
 
         const [existing, userData] = await Promise.all([
-          findTaskComment(resolved_task_id, comment_id),
+          findTaskComment(task_id, comment_id),
           getCurrentUser(),
         ]);
 
@@ -292,7 +338,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
         // existing comment untouched.
         const abortNotice = "the comment was NOT changed";
         const { markdown, images } = await resolveImagesOrAbort(comment, abortNotice);
-        const uploaded = await uploadImagesOrAbort(resolved_task_id, images, abortNotice);
+        const uploaded = await uploadImagesOrAbort(task_id, images, abortNotice);
 
         const commentBlocks = convertMarkdownToClickUpBlocks(markdown, toAttachmentMap(uploaded));
 
@@ -319,8 +365,8 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
               text: [
                 `Comment edited successfully!`,
                 `comment_id: ${comment_id}`,
-                `task_id: ${resolved_task_id}`,
-                `task_url: https://app.clickup.com/t/${resolved_task_id}`,
+                `task_id: ${task_id}`,
+                `task_url: https://app.clickup.com/t/${task_id}`,
                 `created: ${timestampToIso(existing.date)} (unchanged by the edit)`,
                 `previous_text: ${existing.comment_text || '(no plain text available)'}`,
                 `new_comment: ${summarizeMarkdownForEcho(comment)}`,
@@ -351,9 +397,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
       `GUARDRAILS: same as editComment - only comments written by the API token's own user can be deleted, and only within ${CONFIG.commentEditWindowHours} hours of their creation. Replies inside a thread cannot be deleted.`,
     ].join("\n"),
     {
-      task_id: z.string().min(1).refine(val => isTaskId(val) || isCustomTaskId(val), {
-        message: "Must be an internal task ID (6+ alphanumeric characters) or a custom task ID (e.g. SOI-4422)"
-      }).describe("The ID of the task the comment belongs to - needed to locate the comment. Internal ID (e.g. \"869c4za0g\") or custom ID (e.g. \"SOI-4422\")"),
+      task_id: taskIdSchema.describe("The ID of the task the comment belongs to - needed to locate the comment. Internal ID (e.g. \"869c4za0g\") or custom ID (e.g. \"SOI-4422\")"),
       comment_id: z.string().min(1).describe("The ID of the comment to delete, as returned by addComment or getTaskById"),
     },
     {
@@ -419,11 +463,12 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
         "Updates various aspects of an existing task including dependencies and relationships.",
         "ALWAYS include the task URL (https://app.clickup.com/t/TASK_ID) when updating or referencing tasks.",
         "Use getListInfo first to see valid status options.",
-        "DESCRIPTION: `append_description` adds a dated block under the existing description and is the safe default for notes. `replace_description` rewrites the whole description - use it to correct or restructure the specification. Read the current description with getTaskById first and repeat everything worth keeping; the previous description is echoed back so it can be restored with another call.",
+        "DESCRIPTIONS: `append_description` adds a dated section below the existing text; `description` REPLACES the whole text (use it to restructure, shorten or correct a description). Pass only one of them.",
+        "Before replacing, read the current description via getTaskById and carry over everything that is still needed - ClickUp keeps a description history, so a bad replacement can be restored in the UI (edits within the same minute merge into one version), but the MCP cannot undo it.",
         "STATUS UPDATES: Use the `addComment` tool for progress reports, work logs, and status updates rather than the task description.",
         IMAGE_SUPPORT_HINT,
         "Task descriptions should contain requirements, specifications, and core task information.",
-        "LINKING IN DESCRIPTIONS: When appending descriptions, include links to related tasks, lists, or external resources.",
+        "LINKING IN DESCRIPTIONS: Include links to related tasks, lists, or external resources (format: https://app.clickup.com/t/TASK_ID).",
         "IMPORTANT: When updating tasks (especially when booking time or adding progress), ensure the status makes sense for the work being done - tasks in 'backlog' or 'closed' states usually shouldn't have active work.",
         "Suggest appropriate status transitions and always provide the clickable task URL in responses."
       ];
@@ -436,12 +481,10 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
       return descriptionBase.join("\n");
     })(),
     {
-      task_id: z.string().min(1).refine(val => isTaskId(val) || isCustomTaskId(val), {
-        message: "Must be an internal task ID (6+ alphanumeric characters) or a custom task ID (e.g. SOI-4422)"
-      }).describe("The task ID to update: internal ID (e.g. \"869c4za0g\") or custom ID (e.g. \"SOI-4422\")"),
+      task_id: taskIdSchema.describe("The task ID to update: internal ID (e.g. \"869c4za0g\") or custom ID (e.g. \"SOI-4422\")"),
       name: taskNameSchema.optional(),
-      append_description: z.string().optional().describe("Optional markdown content to APPEND under the existing task description as a dated block (preserves existing content). Mutually exclusive with replace_description"),
-      replace_description: z.string().optional().describe("Optional markdown content that REPLACES the whole task description. Anything not repeated here is lost (the previous description is echoed back in the response). Mutually exclusive with append_description"),
+      description: z.string().optional().describe("Optional markdown that REPLACES the entire task description. Read the current description first (getTaskById) and repeat everything worth keeping - nothing is merged. Cannot be combined with append_description."),
+      append_description: z.string().optional().describe("Optional markdown content to APPEND below the existing task description as a dated `**Edit (YYYY-MM-DD):**` section (existing content is preserved). Cannot be combined with description."),
       status: z.string().optional().describe("Optional new status name - use getListInfo to see valid options"),
       priority: taskPrioritySchema,
       due_date: taskDueDateSchema.nullable().describe(taskDueDateSchema.description + CLEAR_HINT),
@@ -462,21 +505,24 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
       idempotentHint: false,
       openWorldHint: true
     },
-    async ({ task_id, name, append_description, replace_description, status, priority, due_date, start_date, time_estimate, points, tags, parent_task_id, assignees, remove_assignees, blocking, waiting_on, linked_tasks }: any) => {
+    async ({ task_id, name, description, append_description, status, priority, due_date, start_date, time_estimate, points, tags, parent_task_id, assignees, remove_assignees, blocking, waiting_on, linked_tasks }: any) => {
       try {
-        if (append_description !== undefined && replace_description !== undefined) {
+        // Resolve custom task IDs (e.g. "SOI-4422") to internal IDs
+        task_id = await resolveTaskId(task_id);
+
+        if (description !== undefined && append_description !== undefined) {
           return {
-            content: [{ type: "text" as const, text: "Pass either append_description or replace_description, not both. The task was NOT updated." }],
+            content: [{
+              type: "text" as const,
+              text: "Error: `description` (replace) and `append_description` (append) are mutually exclusive - pass only one of them. The task was NOT updated."
+            }],
           };
         }
-
-        // Resolve custom task ID to internal ID if needed
-        const resolved_task_id = await resolveTaskId(task_id);
 
         const userData = await getCurrentUser();
 
         // Get task details including current markdown description
-        const taskResponse = await fetch(`https://api.clickup.com/api/v2/task/${resolved_task_id}?include_markdown_description=true`, {
+        const taskResponse = await fetch(`https://api.clickup.com/api/v2/task/${task_id}?include_markdown_description=true`, {
           headers: { Authorization: CONFIG.apiKey },
         });
 
@@ -489,15 +535,16 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
         // Resolve and upload description images FIRST - an image problem must
         // abort before dependencies, tags or the task itself are touched, so the
         // caller can fix the markdown and retry the whole call cleanly.
-        // Both description modes go through the same pipeline: only what is done
-        // with the prepared markdown differs (appended block vs whole description).
+        // `description` replaces, `append_description` appends; both go through
+        // the same image pipeline. An empty `description` is a valid request to
+        // clear the description, so check for undefined rather than truthiness.
+        const descriptionInput = description !== undefined ? description : append_description;
         let preparedDescription: string | undefined;
         let uploadedImages: UploadedMarkdownImage[] = [];
-        const descriptionInput = replace_description !== undefined ? replace_description : append_description;
-        if (descriptionInput) {
+        if (descriptionInput !== undefined) {
           const abortNotice = "the task was NOT updated";
           const prepared = await resolveImagesOrAbort(descriptionInput, abortNotice);
-          uploadedImages = await uploadImagesOrAbort(resolved_task_id, prepared.images, abortNotice);
+          uploadedImages = await uploadImagesOrAbort(task_id, prepared.images, abortNotice);
           // Descriptions render plain markdown, so no image fragments are involved
           // here - the local paths are simply swapped for the CDN URLs.
           preparedDescription = rewriteMarkdownImageUrls(
@@ -510,7 +557,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
         let dependencyUpdateResults: string[] = [];
         if (blocking !== undefined || waiting_on !== undefined || linked_tasks !== undefined) {
           const dependencyResults = await updateTaskDependencies(
-            resolved_task_id,
+            task_id,
             taskData,
             { blocking, waiting_on, linked_tasks }
           );
@@ -529,7 +576,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
           for (const tagName of tagsToAdd) {
             try {
               const addTagResponse = await fetch(
-                `https://api.clickup.com/api/v2/task/${resolved_task_id}/tag/${encodeURIComponent(tagName)}`,
+                `https://api.clickup.com/api/v2/task/${task_id}/tag/${encodeURIComponent(tagName)}`,
                 {
                   method: 'POST',
                   headers: { Authorization: CONFIG.apiKey }
@@ -549,7 +596,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
           for (const tagName of tagsToRemove) {
             try {
               const removeTagResponse = await fetch(
-                `https://api.clickup.com/api/v2/task/${resolved_task_id}/tag/${encodeURIComponent(tagName)}`,
+                `https://api.clickup.com/api/v2/task/${task_id}/tag/${encodeURIComponent(tagName)}`,
                 {
                   method: 'DELETE',
                   headers: { Authorization: CONFIG.apiKey }
@@ -566,13 +613,14 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
           }
         }
 
-        // Append adds a dated block under the current description; replace sends
-        // the prepared markdown as is. An empty replace_description clears it.
+        // Build the description to write: a full replacement, or the existing
+        // text plus a dated append section.
         let finalDescription: string | undefined;
-        const currentDescription = taskData.markdown_description || "";
-        if (replace_description !== undefined) {
+        if (description !== undefined) {
+          // An empty string clears the description (the image pipeline skips empty input)
           finalDescription = preparedDescription ?? "";
         } else if (preparedDescription !== undefined) {
+          const currentDescription = taskData.markdown_description || "";
           const timestamp = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
           const separator = currentDescription.trim() ? "\n\n---\n" : "";
           finalDescription = currentDescription + separator + `**Edit (${timestamp}):** ${preparedDescription}`;
@@ -608,7 +656,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
         // Update the task (if there are non-tag updates)
         let updatedTask = taskData;
         if (Object.keys(updateBody).length > 0) {
-          const updateResponse = await fetch(`https://api.clickup.com/api/v2/task/${resolved_task_id}`, {
+          const updateResponse = await fetch(`https://api.clickup.com/api/v2/task/${task_id}`, {
             method: 'PUT',
             headers: {
               Authorization: CONFIG.apiKey,
@@ -627,7 +675,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
 
         // If only tags or dependencies were updated, fetch the task again to get the updated state
         if ((tags !== undefined || blocking !== undefined || waiting_on !== undefined || linked_tasks !== undefined) && Object.keys(updateBody).length === 0) {
-          const refreshResponse = await fetch(`https://api.clickup.com/api/v2/task/${resolved_task_id}`, {
+          const refreshResponse = await fetch(`https://api.clickup.com/api/v2/task/${task_id}`, {
             headers: { Authorization: CONFIG.apiKey },
           });
           if (refreshResponse.ok) {
@@ -636,12 +684,16 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
         }
 
         const responseLines = formatTaskResponse(updatedTask, 'updated', {
-          name, append_description, status, priority, due_date, start_date, time_estimate, points, tags, parent_task_id, assignees, remove_assignees, blocking, waiting_on, linked_tasks
+          name, description, append_description, status, priority, due_date, start_date, time_estimate, points, tags, parent_task_id, assignees, remove_assignees, blocking, waiting_on, linked_tasks
         }, userData);
 
-        // Echo what was overwritten so a wrong replacement can be undone with another call
-        if (replace_description !== undefined) {
-          responseLines.push(`previous_description: ${currentDescription.trim() ? currentDescription : '(empty)'}`);
+        if (description !== undefined) {
+          const previousDescription = taskData.markdown_description || "";
+          responseLines.push(`description: replaced (previous ${previousDescription.length} chars -> ${finalDescription?.length ?? 0} chars; the old version stays restorable via ClickUp's description history)`);
+          // Echo what was overwritten so a wrong replacement can be undone with another call
+          responseLines.push(`previous_description: ${previousDescription.trim() ? previousDescription : '(empty)'}`);
+        } else if (append_description !== undefined) {
+          responseLines.push('description: appended as dated edit section');
         }
 
         // Add dependency update results if any
@@ -759,29 +811,30 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
           throw new Error(`Error creating task: ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
         }
 
-        let createdTask = await response.json();
+        const createdTask = await response.json();
 
-        // Handle tags separately via dedicated API endpoints
-        if (tags && tags.length > 0) {
+        // Tags are omitted from the create body by buildTaskRequestBody because they
+        // need the dedicated tag endpoints, so apply them here - the same way
+        // updateTask does - otherwise the requested tags are silently dropped.
+        const tagCreateResults: string[] = [];
+        if (tags !== undefined && tags.length > 0) {
           for (const tagName of tags) {
-            const encodedTag = encodeURIComponent(tagName);
-            const tagResponse = await fetch(`https://api.clickup.com/api/v2/task/${createdTask.id}/tag/${encodedTag}`, {
-              method: 'POST',
-              headers: {
-                Authorization: CONFIG.apiKey,
-                'Content-Type': 'application/json'
+            try {
+              const addTagResponse = await fetch(
+                `https://api.clickup.com/api/v2/task/${createdTask.id}/tag/${encodeURIComponent(tagName)}`,
+                {
+                  method: 'POST',
+                  headers: { Authorization: CONFIG.apiKey }
+                }
+              );
+              if (!addTagResponse.ok) {
+                console.error(`Failed to add tag "${tagName}": ${addTagResponse.status}`);
+                tagCreateResults.push(`Failed to add tag: ${tagName}`);
               }
-            });
-            if (!tagResponse.ok) {
-              console.error(`Error adding tag "${tagName}" to task ${createdTask.id}: ${tagResponse.status}`);
+            } catch (error) {
+              console.error(`Error adding tag "${tagName}":`, error);
+              tagCreateResults.push(`Error adding tag: ${tagName}`);
             }
-          }
-          // Re-fetch task to get updated tags
-          const refreshResponse = await fetch(`https://api.clickup.com/api/v2/task/${createdTask.id}`, {
-            headers: { Authorization: CONFIG.apiKey }
-          });
-          if (refreshResponse.ok) {
-            createdTask = await refreshResponse.json();
           }
         }
 
@@ -827,6 +880,9 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
 
         responseLines.push(...formatAttachedImages(uploaded));
         responseLines.push(...imageWarnings);
+        if (tagCreateResults.length > 0) {
+          responseLines.push('tag_warnings: ' + tagCreateResults.join('; '));
+        }
 
         return {
           content: [
@@ -878,54 +934,6 @@ function formatTimeEstimate(hours: number): string {
   const displayHours = Math.floor(hours);
   const displayMinutes = Math.round((hours - displayHours) * 60);
   return displayHours > 0 ? `${displayHours}h ${displayMinutes}m` : `${displayMinutes}m`;
-}
-
-/** A task comment as returned by GET /api/v2/task/{task_id}/comment */
-interface ExistingComment {
-  id: string;
-  date: string;
-  comment_text?: string;
-  user?: { id?: number | string; username?: string };
-  reply_count?: number;
-}
-
-/** Cursor into the comment list: the date and id of the last comment of the previous page */
-interface CommentPageCursor {
-  start: string;
-  startId: string;
-}
-
-/**
- * Never page further back than this. A generous edit window would otherwise walk
- * the entire comment history of a busy ticket and eat the 100 calls/minute budget.
- */
-const MAX_COMMENT_PAGES = 10;
-
-/** One page of task comments, newest first, 25 per page */
-async function fetchCommentPage(
-  taskId: string,
-  cursor?: CommentPageCursor
-): Promise<ExistingComment[]> {
-  // Note there is no `start_date` parameter - passing one is silently ignored.
-  // Older pages are reached with `start` + `start_id` of the previous page's last entry.
-  const query = cursor
-    ? `?${new URLSearchParams({ start: cursor.start, start_id: cursor.startId })}`
-    : "";
-
-  const response = await fetch(
-    `https://api.clickup.com/api/v2/task/${taskId}/comment${query}`,
-    { headers: { Authorization: CONFIG.apiKey } }
-  );
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(
-      `Error loading comments of task ${taskId}: ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`
-    );
-  }
-
-  const data = await response.json();
-  return Array.isArray(data.comments) ? data.comments : [];
 }
 
 /**
@@ -1112,7 +1120,16 @@ async function updateTaskDependencies(
   // Get current dependencies
   const currentBlocking = taskData.blocking?.map((dep: any) => dep.id) || [];
   const currentWaitingOn = taskData.waiting_on?.map((dep: any) => dep.id) || [];
-  const currentLinked = taskData.linked_tasks?.map((task: any) => task.id) || [];
+  // `linked_tasks` entries are link records, not tasks: each has `task_id` and
+  // `link_id` (the two ends of the link) and no `id` at all. Mapping `.id` here
+  // produced `[undefined, ...]`, so every existing link looked like it was no
+  // longer requested, and the removal loop then issued
+  // `DELETE /task/{id}/link/undefined`, which the API rejects. The result was a
+  // `linked_tasks` field documented as "replace" that could never remove
+  // anything. Take whichever end of the record is not the task being updated.
+  const currentLinked = taskData.linked_tasks
+    ?.map((link: any) => (link.task_id === taskData.id ? link.link_id : link.task_id))
+    .filter((id: string | undefined): id is string => Boolean(id)) || [];
 
   // Helper function to make dependency API calls
   async function modifyDependency(
