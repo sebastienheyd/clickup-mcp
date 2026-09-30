@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `getTaskById` no longer drops the whole comment history when a later comment page fails (typically a 429 close to the API limit): the comments already loaded are shown, preceded by a warning that names the failure. The 250-comment paging cap is reported in the output the same way instead of only on stderr.
+- `getTaskById` says how many replies of a thread are missing when only some of them could be loaded, instead of presenting the partial thread as complete.
 - Two adjacent markdown code blocks (or a code block followed by a table) in a comment are written as two separate ClickUp blocks. They used to fuse into one, because Quill merges consecutive code-block lines, and read back as a single fence.
 - `getTaskById` accepts custom task IDs (e.g. `SOI-4422`) again. The upstream 1.9.0 merge had replaced the fork's ID schema with a 6-16 alphanumeric bound and dropped the custom ID resolution, so reading a task by custom ID failed while every write tool still accepted it. Covered by tests now.
 

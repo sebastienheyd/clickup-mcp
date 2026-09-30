@@ -23,7 +23,7 @@ export interface CommentPageCursor {
 export const MAX_COMMENT_PAGES = 10;
 
 /** Page size ClickUp uses for the comment list - a shorter page means the last page. */
-const COMMENTS_PER_PAGE = 25;
+export const COMMENTS_PER_PAGE = 25;
 
 /** One page of task comments, newest first, 25 per page */
 export async function fetchCommentPage(
@@ -52,21 +52,44 @@ export async function fetchCommentPage(
   return Array.isArray(data.comments) ? data.comments : [];
 }
 
+/** The top-level comments of a task plus whether the history is complete. */
+export interface CommentHistory {
+  /** Top-level comments, newest first */
+  comments: ExistingComment[];
+  /**
+   * Why older comments are missing, or null when the whole list was loaded.
+   * `capped`: the task has more comments than MAX_COMMENT_PAGES pages;
+   * `error`: a page request failed (rate limit, 5xx...) - `comments` holds what was
+   * loaded before the failure, possibly nothing.
+   */
+  incomplete: { reason: "capped" | "error"; detail: string } | null;
+}
+
 /**
  * All top-level comments of a task, newest first.
  *
  * The comment list endpoint returns 25 comments per page, so longer histories are
  * paged with `start`/`start_id`. Paging is capped at MAX_COMMENT_PAGES (250 comments)
- * to protect the API budget; hitting the cap is logged instead of failing.
+ * to protect the API budget. Never throws: a failing page (typically a 429 close to
+ * the API limit on exactly the busy tasks that need paging) keeps the comments
+ * already loaded and is reported through `incomplete`, so the caller can show a
+ * partial history with a warning instead of silently showing none.
  */
-export async function fetchAllTopLevelComments(taskId: string): Promise<ExistingComment[]> {
+export async function fetchAllTopLevelComments(taskId: string): Promise<CommentHistory> {
   const comments: ExistingComment[] = [];
   let cursor: CommentPageCursor | undefined;
   let pages = 0;
   let lastPageWasFull = false;
 
   while (pages < MAX_COMMENT_PAGES) {
-    const page = await fetchCommentPage(taskId, cursor);
+    let page: ExistingComment[];
+    try {
+      page = await fetchCommentPage(taskId, cursor);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.error(`Error fetching comments of task ${taskId} (page ${pages + 1}, ${comments.length} loaded so far): ${detail}`);
+      return { comments, incomplete: { reason: "error", detail } };
+    }
     pages++;
     if (page.length === 0) {
       lastPageWasFull = false;
@@ -84,12 +107,12 @@ export async function fetchAllTopLevelComments(taskId: string): Promise<Existing
   }
 
   if (lastPageWasFull && pages >= MAX_COMMENT_PAGES) {
-    console.error(
-      `Task ${taskId} has more than ${comments.length} top-level comments - older comments were not loaded (capped at ${MAX_COMMENT_PAGES} pages).`
-    );
+    const detail = `the task has more than ${comments.length} top-level comments; loading stops after ${MAX_COMMENT_PAGES} pages to protect the API budget`;
+    console.error(`Task ${taskId}: older comments were not loaded - ${detail}.`);
+    return { comments, incomplete: { reason: "capped", detail } };
   }
 
-  return comments;
+  return { comments, incomplete: null };
 }
 
 /**

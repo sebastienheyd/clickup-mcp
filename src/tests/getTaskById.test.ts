@@ -402,3 +402,166 @@ test('getTaskById schema accepts internal and custom IDs but rejects URLs and pr
   assert.equal(idSchema.safeParse('CU-869c4za0g').success, false);
   assert.equal(idSchema.safeParse('#869c4za0g').success, false);
 });
+
+test('getTaskById keeps the loaded comments and warns when a later comment page fails', async (t) => {
+  t.mock.timers.enable();
+  process.env.CLICKUP_API_KEY = 'test-key';
+  process.env.CLICKUP_TEAM_ID = 'team1';
+
+  const { registerTaskToolsRead } = await import('../tools/task-tools');
+
+  const mockAgent = new MockAgent();
+  mockAgent.disableNetConnect();
+  setGlobalDispatcher(mockAgent);
+  const client = mockAgent.get('https://api.clickup.com');
+
+  client.intercept({ path: /\/api\/v2\/task\/task123\?.*/, method: 'GET' })
+    .reply(200, {
+      id: 'task123',
+      name: 'Busy Task',
+      markdown_description: '',
+      attachments: [],
+      creator: { username: 'creator', id: '1' },
+      assignees: [],
+      list: { id: 'list1', name: 'List' },
+      space: { id: 'space1', name: 'Space' },
+      status: { status: 'open', type: 'open' },
+      url: 'https://app.clickup.com/t/task123',
+      date_created: '0',
+      date_updated: '0'
+    });
+
+  // A full first page (25 comments) forces a second page request...
+  const firstPage = Array.from({ length: 25 }, (_, i) => ({
+    id: `c${25 - i}`,
+    date: String(100000 - i * 1000),
+    comment: [{ text: `Comment ${25 - i}` }],
+    comment_text: `Comment ${25 - i}`,
+    user: { id: 'u1', username: 'alice' },
+    reply_count: 0,
+  }));
+  client.intercept({ path: '/api/v2/task/task123/comment', method: 'GET' })
+    .reply(200, { comments: firstPage });
+
+  // ...which fails, as happens close to the 100 calls/minute limit
+  client.intercept({ path: /\/api\/v2\/task\/task123\/comment\?start=.*/, method: 'GET' })
+    .reply(429, { err: 'Rate limit reached', ECODE: 'RATE_LIMIT' });
+
+  client.intercept({ path: '/api/v2/task/task123/time_in_status', method: 'GET' })
+    .reply(200, { status_history: [], current_status: null });
+
+  client.intercept({ path: /\/api\/v2\/team\/team1\/time_entries.*/, method: 'GET' })
+    .reply(200, { data: [] });
+
+  const tools: Record<string, any> = {};
+  const serverStub = {
+    tool: (name: string, _desc: string, _schema: any, _opts: any, handler: any) => {
+      tools[name] = handler;
+    }
+  } as any;
+
+  registerTaskToolsRead(serverStub, { user: { username: 'me', id: 'u1' } });
+
+  const result = await tools.getTaskById({ id: 'task123' });
+  const fullText = result.content
+    .filter((block: any) => typeof block.text === 'string')
+    .map((block: any) => block.text)
+    .join('\n');
+
+  // The 25 comments that were loaded are all rendered...
+  assert.ok(fullText.includes('(comment_id: c1)'), 'oldest loaded comment should be rendered');
+  assert.ok(fullText.includes('(comment_id: c25)'), 'newest loaded comment should be rendered');
+
+  // ...and the gap is visible in the output, before the oldest loaded comment
+  const warningIdx = fullText.indexOf('WARNING: only the 25 newest top-level comments are shown');
+  assert.ok(warningIdx !== -1, `a warning about the missing older comments should be rendered, got: ${fullText}`);
+  assert.ok(fullText.includes('429'), 'the warning should carry the failure reason');
+  assert.ok(warningIdx < fullText.indexOf('(comment_id: c1)'), 'the warning should precede the loaded comments');
+
+  (mockAgent as any).assertNoPendingInterceptors();
+  await mockAgent.close();
+  t.mock.timers.reset();
+});
+
+test('getTaskById says how many replies of a thread are missing when only some were loaded', async (t) => {
+  t.mock.timers.enable();
+  process.env.CLICKUP_API_KEY = 'test-key';
+  process.env.CLICKUP_TEAM_ID = 'team1';
+
+  const { registerTaskToolsRead } = await import('../tools/task-tools');
+
+  const mockAgent = new MockAgent();
+  mockAgent.disableNetConnect();
+  setGlobalDispatcher(mockAgent);
+  const client = mockAgent.get('https://api.clickup.com');
+
+  client.intercept({ path: /\/api\/v2\/task\/task123\?.*/, method: 'GET' })
+    .reply(200, {
+      id: 'task123',
+      name: 'Test Task',
+      markdown_description: '',
+      attachments: [],
+      creator: { username: 'creator', id: '1' },
+      assignees: [],
+      list: { id: 'list1', name: 'List' },
+      space: { id: 'space1', name: 'Space' },
+      status: { status: 'open', type: 'open' },
+      url: 'https://app.clickup.com/t/task123',
+      date_created: '0',
+      date_updated: '0'
+    });
+
+  // reply_count announces 3 replies but the reply endpoint only returns one
+  client.intercept({ path: '/api/v2/task/task123/comment', method: 'GET' })
+    .reply(200, {
+      comments: [{
+        id: 'c1',
+        date: '2000',
+        comment: [{ text: 'Parent comment' }],
+        comment_text: 'Parent comment',
+        user: { id: 'u1', username: 'alice' },
+        reply_count: 3,
+      }]
+    });
+  client.intercept({ path: '/api/v2/comment/c1/reply', method: 'GET' })
+    .reply(200, {
+      comments: [{
+        id: 'r1',
+        date: '3000',
+        comment: [{ text: 'Only reply' }],
+        comment_text: 'Only reply',
+        user: { id: 'u2', username: 'bob' },
+      }]
+    });
+
+  client.intercept({ path: '/api/v2/task/task123/time_in_status', method: 'GET' })
+    .reply(200, { status_history: [], current_status: null });
+
+  client.intercept({ path: /\/api\/v2\/team\/team1\/time_entries.*/, method: 'GET' })
+    .reply(200, { data: [] });
+
+  const tools: Record<string, any> = {};
+  const serverStub = {
+    tool: (name: string, _desc: string, _schema: any, _opts: any, handler: any) => {
+      tools[name] = handler;
+    }
+  } as any;
+
+  registerTaskToolsRead(serverStub, { user: { username: 'me', id: 'u1' } });
+
+  const result = await tools.getTaskById({ id: 'task123' });
+  const fullText = result.content
+    .filter((block: any) => typeof block.text === 'string')
+    .map((block: any) => block.text)
+    .join('\n');
+
+  assert.ok(fullText.includes('Only reply'), 'the loaded reply should be rendered');
+  assert.ok(
+    fullText.includes('↳ 2 more replies of this comment could not be loaded (1 of 3 shown).'),
+    `a partial thread must not look complete, got: ${fullText}`
+  );
+
+  (mockAgent as any).assertNoPendingInterceptors();
+  await mockAgent.close();
+  t.mock.timers.reset();
+});

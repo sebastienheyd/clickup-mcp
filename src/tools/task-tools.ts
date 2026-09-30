@@ -133,15 +133,10 @@ async function loadTaskContent(taskId: string): Promise<(ContentBlock | ImageMet
 }
 
 async function loadTaskComments(id: string): Promise<DatedContentEvent[]> {
-  let comments: ExistingComment[];
-  try {
-    // The comment list only returns 25 top-level comments per page - page through
-    // all of them (the previous `?start_date=0` was silently ignored by ClickUp).
-    comments = await fetchAllTopLevelComments(id);
-  } catch (error) {
-    console.error(`Error fetching comments for task ${id}:`, error);
-    return [];
-  }
+  // The comment list only returns 25 top-level comments per page - page through
+  // all of them (the previous `?start_date=0` was silently ignored by ClickUp).
+  // A failing page keeps what was loaded before it; the gap is reported below.
+  const { comments, incomplete } = await fetchAllTopLevelComments(id);
 
   // Replies live behind their own endpoint and are missing from the comment
   // list. Only threads (reply_count > 0) cost extra requests, bounded in count
@@ -173,12 +168,15 @@ async function loadTaskComments(id: string): Promise<DatedContentEvent[]> {
           });
           contentBlocks.push(...await convertClickUpTextItemsToToolCallResult(reply.comment ?? []));
         }
-        if (replies.length === 0) {
-          // The thread exists (reply_count says so) but its replies were skipped
-          // over the budget cap or failed to load - never pretend it is empty.
+        if (replies.length < replyCount) {
+          // The thread has more replies than were loaded (skipped over the budget
+          // cap, failed, or truncated) - never pretend it is empty or complete.
+          const missing = replyCount - replies.length;
           contentBlocks.push({
             type: "text",
-            text: `↳ This comment has ${replyCount} repl${replyCount === 1 ? "y" : "ies"} that could not be loaded.`,
+            text: replies.length === 0
+              ? `↳ This comment has ${replyCount} repl${replyCount === 1 ? "y" : "ies"} that could not be loaded.`
+              : `↳ ${missing} more repl${missing === 1 ? "y" : "ies"} of this comment could not be loaded (${replies.length} of ${replyCount} shown).`,
           });
         }
       }
@@ -189,6 +187,20 @@ async function loadTaskComments(id: string): Promise<DatedContentEvent[]> {
       };
     })
   );
+
+  if (incomplete) {
+    // Missing comments are always the OLDEST ones (the list is paged newest first),
+    // so the warning is dated 0 to sort before every loaded comment. Without it the
+    // reader would take a partial (or empty) history for the whole story.
+    const loaded = comments.length;
+    const text = incomplete.reason === "capped"
+      ? `WARNING: only the ${loaded} newest top-level comments are shown - ${incomplete.detail}.`
+      : loaded === 0
+        ? `WARNING: the comments of this task could not be loaded - ${incomplete.detail}`
+        : `WARNING: only the ${loaded} newest top-level comments are shown - older comments could not be fetched: ${incomplete.detail}`;
+    commentEvents.push({ date: "0", contentBlocks: [{ type: "text", text }] });
+  }
+
   return commentEvents;
 }
 
