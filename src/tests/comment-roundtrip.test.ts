@@ -170,3 +170,27 @@ test("paragraph breaks survive the full read/write round trip", async () => {
   //    fed through getTaskById -> editComment neither gains nor loses blank lines
   assert.deepEqual(convertMarkdownToClickUpBlocks(text), written);
 });
+
+test("two adjacent code blocks survive the full read/write round trip as two blocks", async () => {
+  const { convertMarkdownToClickUpBlocks } = await import("../clickup-text");
+  const markdown = "```sh\nnpm test\n```\n\n```\n101 passing\n```";
+
+  // 1. Write: the two blocks must be kept apart by an empty '\n' fragment
+  const written = convertMarkdownToClickUpBlocks(markdown);
+  const separators = written.filter(
+    (b) => b.text === "\n" && Object.keys(b.attributes ?? {}).length === 0
+  );
+  assert.equal(separators.length, 1, "exactly one plain newline between the two code blocks");
+
+  // 2. Read the fragments back: two fences, not one
+  const read = await convertClickUpTextItemsToToolCallResult(written as any);
+  const text = read
+    .filter((b): b is { type: "text"; text: string } => b.type === "text")
+    .map((b) => b.text)
+    .join("\n");
+  assert.equal(text, markdown, "read-back markdown must equal the original");
+
+  // 3. Write the read-back text again: identical fragments, so getTaskById -> editComment
+  //    neither fuses the blocks nor adds blank lines
+  assert.deepEqual(convertMarkdownToClickUpBlocks(text), written);
+});

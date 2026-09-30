@@ -217,3 +217,25 @@ test("convertMarkdownToClickUpBlocks adds no empty line around headings, code bl
   // one plain newline terminating each non-final paragraph, none as extra blank lines
   assert.equal(plainNewlines.length, 3);
 });
+
+test("convertMarkdownToClickUpBlocks separates adjacent code blocks and tables with an empty line", () => {
+  // Quill fuses consecutive code-block lines into one block, so two fenced blocks
+  // (or a code block followed by a table) need a plain '\n' fragment in between.
+  const blocks = convertMarkdownToClickUpBlocks(
+    "```sh\nls\n```\n\n```\nfile.txt\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |"
+  );
+  const texts = blocks.map(b => b.text);
+  assert.deepEqual(texts, [
+    "ls", "\n",
+    "\n",
+    "file.txt", "\n",
+    "\n",
+    "| a   | b   |", "\n", "| --- | --- |", "\n", "| 1   | 2   |", "\n",
+  ]);
+  // the separators carry no attribute, every code line keeps its own code-block marker
+  assert.deepEqual(blocks[2].attributes, {});
+  assert.deepEqual(blocks[5].attributes, {});
+  assert.deepEqual(blocks[1].attributes, { "code-block": { "code-block": "sh" } });
+  assert.deepEqual(blocks[4].attributes, { "code-block": { "code-block": "plain" } });
+  assert.deepEqual(blocks[7].attributes, { "code-block": { "code-block": "plain" } });
+});

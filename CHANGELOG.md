@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Two adjacent markdown code blocks (or a code block followed by a table) in a comment are written as two separate ClickUp blocks. They used to fuse into one, because Quill merges consecutive code-block lines, and read back as a single fence.
 - `getTaskById` accepts custom task IDs (e.g. `SOI-4422`) again. The upstream 1.9.0 merge had replaced the fork's ID schema with a 6-16 alphanumeric bound and dropped the custom ID resolution, so reading a task by custom ID failed while every write tool still accepted it. Covered by tests now.
 
 ## [1.10.0] - 2026-09-30

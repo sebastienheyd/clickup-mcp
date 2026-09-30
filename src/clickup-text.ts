@@ -908,8 +908,21 @@ function walkMdastNodes(
  */
 const FLOW_BLOCK_TYPES = new Set<string>(['paragraph', 'list']);
 
+/**
+ * Block types emitted as code-block lines (tables are rendered inside a code block).
+ * Quill fuses consecutive code-block lines into ONE block whatever the source looked
+ * like, so two of them in a row need an empty line in between - otherwise a command
+ * and its output, or a code block and a table, collapse into a single block, and the
+ * read side (which groups consecutive code-block lines into one fence) can no longer
+ * tell them apart.
+ */
+const CODE_BLOCK_TYPES = new Set<string>(['code', 'table']);
+
 function needsBlankLineBetween(prev: Content, next: Content): boolean {
-  return FLOW_BLOCK_TYPES.has(prev.type) && FLOW_BLOCK_TYPES.has(next.type);
+  if (FLOW_BLOCK_TYPES.has(prev.type) && FLOW_BLOCK_TYPES.has(next.type)) {
+    return true;
+  }
+  return CODE_BLOCK_TYPES.has(prev.type) && CODE_BLOCK_TYPES.has(next.type);
 }
 
 /**
