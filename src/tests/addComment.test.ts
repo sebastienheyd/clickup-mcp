@@ -233,3 +233,65 @@ test("addComment converts markdown formatting to ClickUp blocks", async (t) => {
   t.mock.timers.runAll();
   t.mock.timers.reset();
 });
+
+test("addComment does not call an old parent invalid when the lookup stops at the page cap", async (t) => {
+  t.mock.timers.enable();
+  process.env.CLICKUP_API_KEY = "test-key";
+  process.env.CLICKUP_TEAM_ID = "team1";
+
+  const { registerTaskToolsWrite } = await import("../tools/task-write-tools");
+  const { MAX_COMMENT_PAGES } = await import("../shared/comments");
+
+  const mockAgent = new MockAgent();
+  mockAgent.disableNetConnect();
+  setGlobalDispatcher(mockAgent);
+  const client = mockAgent.get("https://api.clickup.com");
+
+  // Every page is full and none contains the parent: the search hits the cap
+  // without ever reaching the end of the list.
+  const fullPage = Array.from({ length: 25 }, (_, i) => ({
+    id: `c${i}`,
+    date: String(100000 - i),
+    comment: [{ text: "Recent comment" }],
+    user: { id: "u1", username: "me" },
+    reply_count: 0,
+  }));
+  client
+    .intercept({ path: /\/api\/v2\/task\/task123\/comment.*/, method: "GET" })
+    .reply(200, { comments: fullPage })
+    .times(MAX_COMMENT_PAGES);
+
+  const tools: Record<string, any> = {};
+  const serverStub = {
+    tool: (
+      name: string,
+      _desc: string,
+      _schema: any,
+      _opts: any,
+      handler: any,
+    ) => {
+      tools[name] = handler;
+    },
+  } as any;
+
+  registerTaskToolsWrite(serverStub, { user: { username: "me", id: "u1" } });
+
+  const result = await tools.addComment({
+    task_id: "task123",
+    comment: "Reply text",
+    parent_comment_id: "very-old-comment",
+  });
+
+  const text = result.content[0].text;
+  assert.ok(
+    text.includes("was not found among the 250 newest top-level comments of task task123"),
+    `should explain that the search was capped, got: ${text}`,
+  );
+  assert.ok(!text.includes("is not a top-level comment"), "must not claim the id is invalid");
+
+  // Exactly MAX_COMMENT_PAGES pages were requested, no POST was attempted
+  (mockAgent as any).assertNoPendingInterceptors();
+  await mockAgent.close();
+  t.mock.timers.runAll();
+  t.mock.timers.reset();
+});

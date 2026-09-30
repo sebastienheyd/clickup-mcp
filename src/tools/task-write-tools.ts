@@ -16,6 +16,7 @@ import {
   uploadResolvedImages,
 } from "../shared/attachments";
 import {
+  COMMENTS_PER_PAGE,
   CommentPageCursor,
   ExistingComment,
   MAX_COMMENT_PAGES,
@@ -205,7 +206,16 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
         // anything is written. This also rejects reply ids (nested replies are
         // not supported by ClickUp's one-level threads).
         if (parent_comment_id) {
-          const parent = await findTopLevelComment(task_id, parent_comment_id);
+          const { comment: parent, exhaustive } = await findTopLevelComment(task_id, parent_comment_id);
+          if (!parent && !exhaustive) {
+            // The lookup stopped at the page cap: the id may well be a valid but old
+            // comment, so do not claim it is invalid.
+            throw new Error(
+              `Comment ${parent_comment_id} was not found among the ${MAX_COMMENT_PAGES * COMMENTS_PER_PAGE} newest top-level comments of task ${task_id}, so no reply was posted. ` +
+              `The lookup stops after ${MAX_COMMENT_PAGES} pages to protect the API budget and getTaskById shows the same range - ` +
+              `reply to a comment listed there, or post a new top-level comment instead.`
+            );
+          }
           if (!parent) {
             throw new Error(
               `Comment ${parent_comment_id} is not a top-level comment of task ${task_id}, so no reply was posted. ` +

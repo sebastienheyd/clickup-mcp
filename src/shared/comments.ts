@@ -115,34 +115,48 @@ export async function fetchAllTopLevelComments(taskId: string): Promise<CommentH
   return { comments, incomplete: null };
 }
 
+/** Result of looking a top-level comment up in a task's comment list. */
+export interface TopLevelCommentLookup {
+  /** The comment, or undefined when it was not found in the searched range */
+  comment: ExistingComment | undefined;
+  /**
+   * true when the whole comment list was searched, so "not found" is definitive;
+   * false when the search stopped at MAX_COMMENT_PAGES with older comments left
+   * unread, so the id may still be a valid but old top-level comment.
+   */
+  exhaustive: boolean;
+}
+
 /**
  * Find a top-level comment of a task by id, paging as far as MAX_COMMENT_PAGES.
  *
  * Unlike editComment's lookup this does not stop at the edit window, because a
- * thread parent can be arbitrarily old. Returns undefined when the id is not a
- * top-level comment of this task - which also catches reply ids, since replies
- * never appear in the task's comment list.
+ * thread parent can be arbitrarily old. `comment` is undefined when the id is not
+ * a top-level comment of this task - which also catches reply ids, since replies
+ * never appear in the task's comment list. Callers must check `exhaustive` before
+ * telling the user the id is invalid: past the page cap the answer is only
+ * "not among the newest comments".
  */
 export async function findTopLevelComment(
   taskId: string,
   commentId: string
-): Promise<ExistingComment | undefined> {
+): Promise<TopLevelCommentLookup> {
   let cursor: CommentPageCursor | undefined;
 
   for (let pages = 0; pages < MAX_COMMENT_PAGES; pages++) {
     const page = await fetchCommentPage(taskId, cursor);
     const match = page.find((entry) => String(entry.id) === String(commentId));
     if (match) {
-      return match;
+      return { comment: match, exhaustive: true };
     }
     if (page.length < COMMENTS_PER_PAGE) {
-      return undefined;
+      return { comment: undefined, exhaustive: true };
     }
     const oldest = page[page.length - 1];
     cursor = { start: String(oldest.date), startId: String(oldest.id) };
   }
 
-  return undefined;
+  return { comment: undefined, exhaustive: false };
 }
 
 /**
