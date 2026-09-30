@@ -21,7 +21,7 @@
     "prepublishOnly": "rm -r dist && npm run build && chmod +x dist/index.js",
     "release": "npm run build && npm publish --access public && git add . && git commit -m \"Release v$(node -p 'require(\"./package.json\").version')\" && git tag -a v$(node -p 'require(\"./package.json\").version') -m \"Release v$(node -p 'require(\"./package.json\").version')\" && git push && git push --tags",
     "mcpb": "npm run build && mcpb pack . ClickUp.mcpb",
-    "test": "node --test -r ts-node/register -r ./src/tests/setup.ts src/**/*.test.ts"
+    "test": "node --test --test-concurrency=1 -r ts-node/register -r ./src/tests/setup.ts src/**/*.test.ts"
   },
   "keywords": [
     "clickup",
