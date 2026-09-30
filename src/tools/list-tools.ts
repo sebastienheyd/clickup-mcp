@@ -131,26 +131,26 @@ export function registerListToolsWrite(server: McpServer) {
     [
       "Appends to or replaces a list's description.",
       "ALWAYS reference the list URL (https://app.clickup.com/v/l/LIST_ID) when updating or discussing lists.",
-      "`append_description` adds a dated block under the existing description and is the safe default. `replace_description` rewrites the whole description - read it with getListInfo first and repeat everything worth keeping; the previous description is echoed back so it can be restored.",
+      "`append_description` adds a dated block under the existing description and is the safe default. `description` rewrites the whole description - read it with getListInfo first and repeat everything worth keeping; the previous description is echoed back so it can be restored.",
       "Use this to add project context, requirements, or guidelines that LLMs should consider when working with tasks in this list.",
       "Include links to related tasks, spaces, or external resources in the appended content.",
       "Content is appended in markdown format with timestamp for tracking changes."
     ].join("\n"),
     {
       list_id: z.string().min(1).describe("The list ID to update"),
-      append_description: z.string().min(1).optional().describe("Markdown content to APPEND under the existing list description as a dated block (preserves existing content). Mutually exclusive with replace_description"),
-      replace_description: z.string().optional().describe("Markdown content that REPLACES the whole list description. Anything not repeated here is lost (the previous description is echoed back). Mutually exclusive with append_description")
+      append_description: z.string().min(1).optional().describe("Markdown content to APPEND under the existing list description as a dated block (preserves existing content). Mutually exclusive with description"),
+      description: z.string().optional().describe("Markdown content that REPLACES the whole list description. Anything not repeated here is lost (the previous description is echoed back). Mutually exclusive with append_description")
     },
     {
       readOnlyHint: false,
       destructiveHint: true,
       idempotentHint: false,
     },
-    async ({ list_id, append_description, replace_description }: any) => {
+    async ({ list_id, append_description, description }: any) => {
       try {
-        if ((append_description === undefined) === (replace_description === undefined)) {
+        if ((append_description === undefined) === (description === undefined)) {
           return {
-            content: [{ type: "text", text: "Pass either append_description or replace_description (exactly one). The list was NOT updated." }],
+            content: [{ type: "text", text: "Pass either append_description or description (exactly one). The list was NOT updated." }],
           };
         }
 
@@ -169,8 +169,8 @@ export function registerListToolsWrite(server: McpServer) {
         const currentDescription = listData.markdown_description || listData.markdown_content || listData.content || "";
         const timestamp = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
         let finalDescription: string;
-        if (replace_description !== undefined) {
-          finalDescription = replace_description;
+        if (description !== undefined) {
+          finalDescription = description;
         } else {
           const separator = currentDescription.trim() ? "\n\n---\n" : "";
           finalDescription = currentDescription + separator + `**Edit (${timestamp}):** ${append_description}`;
@@ -197,7 +197,7 @@ export function registerListToolsWrite(server: McpServer) {
           content: [
             {
               type: "text",
-              text: replace_description !== undefined
+              text: description !== undefined
                 ? [
                     `Successfully replaced the description of list "${listData.name}" (list_id: ${list_id}).`,
                     `previous_description: ${currentDescription.trim() ? currentDescription : '(empty)'}`,

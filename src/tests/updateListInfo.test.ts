@@ -85,7 +85,7 @@ test("updateListInfo replaces the description and echoes the previous one", asyn
 
   registerListToolsWrite(serverStub);
 
-  const result = await tools.updateListInfo({ list_id: "list123", replace_description: "# Rewritten" });
+  const result = await tools.updateListInfo({ list_id: "list123", description: "# Rewritten" });
 
   assert.equal(bodyCaptured.markdown_content, "# Rewritten");
   const text = result.content[0].text;
@@ -97,7 +97,7 @@ test("updateListInfo replaces the description and echoes the previous one", asyn
   t.mock.timers.reset();
 });
 
-test("updateListInfo refuses a call without append_description or replace_description", async (t) => {
+test("updateListInfo refuses a call without append_description or description", async (t) => {
   t.mock.timers.enable();
   process.env.CLICKUP_API_KEY = "test-key";
   process.env.CLICKUP_TEAM_ID = "team1";
@@ -118,7 +118,7 @@ test("updateListInfo refuses a call without append_description or replace_descri
   registerListToolsWrite(serverStub);
 
   const result = await tools.updateListInfo({ list_id: "list123" });
-  assert.ok(result.content[0].text.includes("either append_description or replace_description"), result.content[0].text);
+  assert.ok(result.content[0].text.includes("either append_description or description"), result.content[0].text);
 
   await mockAgent.close();
   t.mock.timers.runAll();
