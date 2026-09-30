@@ -64,7 +64,7 @@ export function registerTimeToolsRead(server: McpServer) {
     "Gets time entries for a specific task or all user's time entries. Returns last 30 days by default if no dates specified.",
     {
       task_id: z.string().min(1).refine(val => isTaskId(val) || isCustomTaskId(val), {
-        message: "Must be an internal task ID (6+ alphanumeric characters) or a custom task ID (e.g. SOI-4422)"
+        message: "Must be an internal task ID (6-16 alphanumeric characters) or a custom task ID (e.g. SOI-4422)"
       }).optional().describe("Optional task ID to filter entries: internal ID (e.g. \"869c4za0g\") or custom ID (e.g. \"SOI-4422\"). If not provided, returns all user's time entries."),
       start_date: z.string().optional().describe("Optional start date filter as ISO date string (e.g., '2024-10-06T00:00:00+02:00'). Defaults to 30 days ago."),
       end_date: z.string().optional().describe("Optional end date filter as ISO date string (e.g., '2024-10-06T23:59:59+02:00'). Defaults to current date."),
@@ -395,7 +395,7 @@ export function registerTimeToolsWrite(server: McpServer) {
       start_time: z.string().optional().describe("New start time as ISO date string (e.g., '2024-10-06T09:00:00+02:00'); the end is recomputed from the duration"),
       description: z.string().optional().describe("New description (pass an empty string to clear it)"),
       task_id: z.string().min(1).refine(val => isTaskId(val) || isCustomTaskId(val), {
-        message: "Must be an internal task ID (6+ alphanumeric characters) or a custom task ID (e.g. SOI-4422)"
+        message: "Must be an internal task ID (6-16 alphanumeric characters) or a custom task ID (e.g. SOI-4422)"
       }).optional().describe("Move the entry to another task: internal ID (e.g. \"869c4za0g\") or custom ID (e.g. \"SOI-4422\")")
     },
     {
@@ -538,7 +538,7 @@ export function registerTimeToolsWrite(server: McpServer) {
     ].join("\n"),
     {
       task_id: z.string().min(1).refine(val => isTaskId(val) || isCustomTaskId(val), {
-        message: "Must be an internal task ID (6+ alphanumeric characters) or a custom task ID (e.g. SOI-4422)"
+        message: "Must be an internal task ID (6-16 alphanumeric characters) or a custom task ID (e.g. SOI-4422)"
       }).describe("The task ID to book time against: internal ID (e.g. \"869c4za0g\") or custom ID (e.g. \"SOI-4422\")"),
       hours: z.number().min(0.01).max(24).describe("Hours to book (decimal format, e.g., 0.25 = 15min, 1.5 = 1h 30min)"),
       description: z.string().optional().describe("Optional description for the time entry"),

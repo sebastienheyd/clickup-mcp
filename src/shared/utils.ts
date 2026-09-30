@@ -54,7 +54,7 @@ export async function resolveTaskId(id: string): Promise<string> {
   if (isCustomTaskId(id)) {
     return resolveCustomTaskId(id);
   }
-  throw new Error(`Invalid task ID format: "${id}". Expected an internal ID (6+ alphanumeric characters) or a custom ID (e.g. "SOI-4422").`);
+  throw new Error(`Invalid task ID format: "${id}". Expected an internal ID (6-16 alphanumeric characters) or a custom ID (e.g. "SOI-4422").`);
 }
 
 // Cache for current user info to avoid repeated API calls and race conditions
