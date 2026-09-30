@@ -137,7 +137,7 @@ async function main() {
       // Try to parse as JSON if it looks like a JSON value
       try {
         if (value.startsWith('{') || value.startsWith('[') || 
-            value === 'true' || value === 'false' || 
+            value === 'true' || value === 'false' || value === 'null' || 
             (value.startsWith('"') && value.endsWith('"')) ||
             (!isNaN(Number(value)) && !key.includes('id') && !value.startsWith('"'))) {
           params[key] = JSON.parse(value);
