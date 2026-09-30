@@ -19,7 +19,17 @@ test("getTimeEntries requests time entries for task", async (t) => {
       path: /\/api\/v2\/team\/team1\/time_entries\?.*task_id=task01.*/,
       method: "GET",
     })
-    .reply(200, { data: [] });
+    .reply(200, {
+      data: [{
+        id: "e1",
+        user: { id: 1, username: "me" },
+        task: { id: "task01", name: "Task" },
+        task_location: { list_id: "l1", list_name: "List" },
+        start: "1700000000000",
+        duration: "3600000",
+        description: "Work",
+      }],
+    });
 
   const tools: Record<string, any> = {};
   const serverStub = {
@@ -38,6 +48,8 @@ test("getTimeEntries requests time entries for task", async (t) => {
 
   const result = await tools.getTimeEntries({ task_id: "task01" });
   assert.ok(result.content[0].text.includes("Time Entries Summary"));
+  // The entry id is what updateTimeEntry/deleteTimeEntry need to target an entry
+  assert.ok(result.content[0].text.includes("(entry_id: e1)"));
 
   await mockAgent.close();
   t.mock.timers.reset();

@@ -79,6 +79,14 @@
       "description": "Create a time entry (book time) on a task for the current user using decimal hours format with optional description and start time."
     },
     {
+      "name": "updateTimeEntry",
+      "description": "Update an own time entry (duration, start time, description or task) found via getTimeEntries. Other users' entries and running timers are refused."
+    },
+    {
+      "name": "deleteTimeEntry",
+      "description": "Delete an own time entry found via getTimeEntries and echo its values so it can be recreated. Other users' entries and running timers are refused."
+    },
+    {
       "name": "readDocument",
       "description": "Get a ClickUp document with page structure and content. Supports reading specific pages and provides complete document metadata with navigation."
     },

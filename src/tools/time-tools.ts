@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { CONFIG } from "../shared/config";
-import { getAllTeamMembers, isTaskId, isCustomTaskId, resolveTaskId } from "../shared/utils";
+import { getAllTeamMembers, getCurrentUser, isTaskId, isCustomTaskId, resolveTaskId } from "../shared/utils";
 
 /**
  * Converts ISO date string to Unix timestamp in milliseconds
@@ -307,7 +307,8 @@ function processTimeEntriesData(data: any, task_id?: string, start_date?: string
             }
             
             const entryDescription = entry.description ? ` | ${entry.description}` : '';
-            outputLines.push(`${entryPrefix} ${entryStart} - ${entryDuration}${entryDescription}`);
+            // The id is what updateTimeEntry/deleteTimeEntry need to target an entry
+            outputLines.push(`${entryPrefix} ${entryStart} - ${entryDuration} (entry_id: ${entry.id})${entryDescription}`);
           });
         }
       }
@@ -325,9 +326,207 @@ function processTimeEntriesData(data: any, task_id?: string, start_date?: string
   };
 }
 
+/**
+ * Reads a single time entry. GET /time_entries/{id} answers `{"data": null}`
+ * with a 200 for an unknown or already deleted id, hence the explicit check.
+ */
+async function fetchTimeEntry(entryId: string): Promise<any> {
+  const response = await fetch(`https://api.clickup.com/api/v2/team/${CONFIG.teamId}/time_entries/${entryId}`, {
+    headers: { Authorization: CONFIG.apiKey },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Error fetching time entry ${entryId}: ${response.status} ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  if (!data.data) {
+    throw new Error(`Time entry ${entryId} was not found. Use getTimeEntries to list existing entries and their entry_id.`);
+  }
+  return data.data;
+}
+
+/**
+ * The safety model of updateTimeEntry/deleteTimeEntry: getTimeEntries can list
+ * other members' entries (include_all_users), so the owner check is what keeps
+ * a wrong entry_id from touching a colleague's time. A running timer is refused
+ * too - its duration is negative and its end does not exist yet.
+ */
+function assertTimeEntryIsOwn(entry: any, currentUserId: number | string, action: string): void {
+  if (String(entry.user?.id ?? '') !== String(currentUserId)) {
+    throw new Error(
+      `Time entry ${entry.id} belongs to ${entry.user?.username || 'someone else'} (user_id: ${entry.user?.id ?? 'unknown'}), not to the current user (user_id: ${currentUserId}). Only your own time entries can be ${action}.`
+    );
+  }
+
+  if (parseInt(entry.duration) < 0) {
+    throw new Error(
+      `Time entry ${entry.id} is a running timer. Stop it in ClickUp before trying to ${action === 'deleted' ? 'delete' : 'update'} it.`
+    );
+  }
+}
+
+function formatTimeEntryLines(entry: any): string[] {
+  return [
+    `entry_id: ${entry.id}`,
+    `task: ${entry.task?.name || 'No Task'} (task_id: ${entry.task?.id || 'none'})`,
+    `start_time: ${timestampToIso(parseInt(entry.start))}`,
+    `duration: ${formatDuration(parseInt(entry.duration) || 0)}`,
+    ...(entry.description ? [`description: ${entry.description}`] : []),
+    `user: ${entry.user?.username || 'Unknown User'} (user_id: ${entry.user?.id ?? 'unknown'})`,
+  ];
+}
+
 export function registerTimeToolsWrite(server: McpServer) {
   // Workaround: SDK 1.27+ dual Zod v3/v4 type causes TS2589 on server.tool() generics
   const tool: (...args: any[]) => any = server.tool.bind(server);
+
+  tool(
+    "updateTimeEntry",
+    [
+      "Updates an existing time entry: duration, start time, description or the task it is booked on.",
+      "Use getTimeEntries first to find the entry_id. Only fields provided are changed.",
+      "GUARDRAILS: only time entries of the API token's own user can be updated, and running timers are refused.",
+      "Use decimal hours for the duration (e.g., 0.25 for 15 minutes, 1.5 for 1h 30min)."
+    ].join("\n"),
+    {
+      entry_id: z.string().min(1).describe("The time entry ID (entry_id shown by getTimeEntries)"),
+      hours: z.number().min(0.01).max(24).optional().describe("New duration in decimal hours (e.g., 0.25 = 15min, 1.5 = 1h 30min)"),
+      start_time: z.string().optional().describe("New start time as ISO date string (e.g., '2024-10-06T09:00:00+02:00'); the end is recomputed from the duration"),
+      description: z.string().optional().describe("New description (pass an empty string to clear it)"),
+      task_id: z.string().min(1).refine(val => isTaskId(val) || isCustomTaskId(val), {
+        message: "Must be an internal task ID (6+ alphanumeric characters) or a custom task ID (e.g. SOI-4422)"
+      }).optional().describe("Move the entry to another task: internal ID (e.g. \"869c4za0g\") or custom ID (e.g. \"SOI-4422\")")
+    },
+    {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+    },
+    async ({ entry_id, hours, start_time, description, task_id }: any) => {
+      try {
+        if (hours === undefined && start_time === undefined && description === undefined && task_id === undefined) {
+          return {
+            content: [{ type: "text" as const, text: "No updates provided. Please specify at least one of hours, start_time, description or task_id." }],
+          };
+        }
+
+        const userData = await getCurrentUser();
+        const existing = await fetchTimeEntry(entry_id);
+        assertTimeEntryIsOwn(existing, userData.user.id, 'updated');
+
+        // ClickUp leaves `end` untouched when only `start` is sent, which makes the
+        // entry inconsistent - so start, end and duration are always sent together.
+        const startMs = start_time !== undefined ? isoToTimestamp(start_time) : parseInt(existing.start);
+        const durationMs = hours !== undefined ? Math.round(hours * 60 * 60 * 1000) : parseInt(existing.duration);
+
+        const requestBody: any = {
+          start: startMs,
+          end: startMs + durationMs,
+          duration: durationMs,
+          ...(description !== undefined && { description }),
+          ...(task_id !== undefined && { tid: await resolveTaskId(task_id) }),
+        };
+
+        const response = await fetch(`https://api.clickup.com/api/v2/team/${CONFIG.teamId}/time_entries/${entry_id}`, {
+          method: 'PUT',
+          headers: {
+            Authorization: CONFIG.apiKey,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(requestBody)
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(`Error updating time entry: ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
+        }
+
+        // PUT answers `{"data": [entry]}` - fall back to what was sent if the shape differs
+        const responseData = await response.json();
+        const updated = Array.isArray(responseData.data) ? responseData.data[0] : responseData.data;
+        const finalEntry = { ...existing, ...requestBody, ...(updated || {}), task: updated?.task || existing.task };
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: [`Time entry updated successfully!`, ...formatTimeEntryLines(finalEntry)].join('\n')
+            }
+          ],
+        };
+
+      } catch (error) {
+        console.error('Error updating time entry:', error);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error updating time entry: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  tool(
+    "deleteTimeEntry",
+    [
+      "Deletes a time entry. This cannot be undone - check the entry with getTimeEntries first.",
+      "GUARDRAILS: only time entries of the API token's own user can be deleted, and running timers are refused.",
+      "The response echoes the deleted values so the entry can be recreated with createTimeEntry if needed."
+    ].join("\n"),
+    {
+      entry_id: z.string().min(1).describe("The time entry ID (entry_id shown by getTimeEntries)")
+    },
+    {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+    },
+    async ({ entry_id }: any) => {
+      try {
+        const userData = await getCurrentUser();
+        const existing = await fetchTimeEntry(entry_id);
+        assertTimeEntryIsOwn(existing, userData.user.id, 'deleted');
+
+        const response = await fetch(`https://api.clickup.com/api/v2/team/${CONFIG.teamId}/time_entries/${entry_id}`, {
+          method: 'DELETE',
+          headers: {
+            Authorization: CONFIG.apiKey,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(`Error deleting time entry: ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
+        }
+
+        // DELETE answers an empty object, so the values come from the entry read beforehand
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: [`Time entry deleted successfully!`, ...formatTimeEntryLines(existing)].join('\n')
+            }
+          ],
+        };
+
+      } catch (error) {
+        console.error('Error deleting time entry:', error);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error deleting time entry: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            },
+          ],
+        };
+      }
+    }
+  );
 
   tool(
     "createTimeEntry",

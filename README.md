@@ -199,6 +199,8 @@ The ClickUp MCP supports three operational modes to balance functionality, secur
 | `updateListInfo`       |      ❌       |  ❌   |   ✅   | **SAFE APPEND-ONLY** updates to list descriptions (preserves existing content)          |
 | `getTimeEntries`       |      ❌       |  ✅   |   ✅   | View time entries and analyze time spent across projects                                |
 | `createTimeEntry`      |      ❌       |  ❌   |   ✅   | Log time entries for task tracking                                                      |
+| `updateTimeEntry`      |      ❌       |  ❌   |   ✅   | Adjust your own time entries (duration, start, description, task)                       |
+| `deleteTimeEntry`      |      ❌       |  ❌   |   ✅   | Delete your own time entries (irreversible, values are echoed back)                     |
 | `readDocument`         |      ❌       |  ✅   |   ✅   | Get document details, page structure, and content with navigation                       |
 | `searchDocuments`      |      ❌       |  ✅   |   ✅   | Search documents by name and space with fuzzy matching and space filtering              |
 | `updateDocumentPage`   |      ❌       |  ❌   |   ✅   | Update existing page content or name with replace/append modes                          |
