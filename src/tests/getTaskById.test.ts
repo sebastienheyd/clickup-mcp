@@ -317,3 +317,88 @@ test('getTaskById renders threaded comment replies nested under their parent', a
   t.mock.timers.reset();
 });
 
+
+test('getTaskById resolves a custom task ID before loading the task', async (t) => {
+  t.mock.timers.enable();
+  process.env.CLICKUP_API_KEY = 'test-key';
+  process.env.CLICKUP_TEAM_ID = 'team1';
+
+  const { registerTaskToolsRead } = await import('../tools/task-tools');
+
+  const mockAgent = new MockAgent();
+  mockAgent.disableNetConnect();
+  setGlobalDispatcher(mockAgent);
+  const client = mockAgent.get('https://api.clickup.com');
+
+  // The custom ID is resolved through the custom_task_ids lookup first...
+  client.intercept({ path: /\/api\/v2\/task\/SOI-4422\?custom_task_ids=true&team_id=team1.*/, method: 'GET' })
+    .reply(200, { id: 'task456', name: 'Resolved Task' });
+
+  // ...and every subsequent call uses the internal ID
+  client.intercept({ path: /\/api\/v2\/task\/task456\?.*/, method: 'GET' })
+    .reply(200, {
+      id: 'task456',
+      name: 'Resolved Task',
+      custom_id: 'SOI-4422',
+      markdown_description: '',
+      attachments: [],
+      creator: { username: 'creator', id: '1' },
+      assignees: [],
+      list: { id: 'list1', name: 'List' },
+      space: { id: 'space1', name: 'Space' },
+      status: { status: 'open', type: 'open' },
+      url: 'https://app.clickup.com/t/task456',
+      date_created: '0',
+      date_updated: '0'
+    });
+
+  client.intercept({ path: /\/api\/v2\/task\/task456\/comment.*/, method: 'GET' })
+    .reply(200, { comments: [] });
+
+  client.intercept({ path: '/api/v2/task/task456/time_in_status', method: 'GET' })
+    .reply(200, { status_history: [], current_status: null });
+
+  client.intercept({ path: /\/api\/v2\/team\/team1\/time_entries.*/, method: 'GET' })
+    .reply(200, { data: [] });
+
+  const tools: Record<string, any> = {};
+  const serverStub = {
+    tool: (name: string, _desc: string, _schema: any, _opts: any, handler: any) => {
+      tools[name] = handler;
+    }
+  } as any;
+
+  registerTaskToolsRead(serverStub, { user: { username: 'me', id: 'u1' } });
+
+  const result = await tools.getTaskById({ id: 'SOI-4422' });
+  assert.ok(result.content.some((block: any) =>
+    typeof block.text === 'string' && block.text.includes('task_id: task456')
+  ));
+
+  (mockAgent as any).assertNoPendingInterceptors();
+  await mockAgent.close();
+  t.mock.timers.reset();
+});
+
+test('getTaskById schema accepts internal and custom IDs but rejects URLs and prefixes', async () => {
+  process.env.CLICKUP_API_KEY = 'test-key';
+  process.env.CLICKUP_TEAM_ID = 'team1';
+
+  const { registerTaskToolsRead } = await import('../tools/task-tools');
+
+  let idSchema: any;
+  const serverStub = {
+    tool: (name: string, _desc: string, schema: any) => {
+      if (name === 'getTaskById') idSchema = schema.id;
+    }
+  } as any;
+  registerTaskToolsRead(serverStub, { user: { username: 'me', id: 'u1' } });
+
+  assert.equal(idSchema.safeParse('869c4za0g').success, true);
+  assert.equal(idSchema.safeParse('wdrv93ebwx').success, true);
+  assert.equal(idSchema.safeParse('SOI-4422').success, true);
+  assert.equal(idSchema.safeParse('PQPS-1234').success, true);
+  assert.equal(idSchema.safeParse('https://app.clickup.com/t/869c4za0g').success, false);
+  assert.equal(idSchema.safeParse('CU-869c4za0g').success, false);
+  assert.equal(idSchema.safeParse('#869c4za0g').success, false);
+});

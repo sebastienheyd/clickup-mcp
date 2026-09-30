@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- `getTaskById` accepts custom task IDs (e.g. `SOI-4422`) again. The upstream 1.9.0 merge had replaced the fork's ID schema with a 6-16 alphanumeric bound and dropped the custom ID resolution, so reading a task by custom ID failed while every write tool still accepted it. Covered by tests now.
+
 ## [1.10.0] - 2026-09-30
 
 ### Changed
