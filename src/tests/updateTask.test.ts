@@ -229,6 +229,12 @@ test("updateTask rejects `description` together with `append_description` withou
   assert.ok(result.content[0].text.includes("mutually exclusive"));
   assert.ok(result.content[0].text.includes("NOT updated"));
 
+  // A custom task ID must be rejected the same way BEFORE it is resolved through
+  // the API - the argument error must not cost a call of the rate-limit budget.
+  const customIdResult = await updateTask({ task_id: "SOI-4422", description: "a", append_description: "b" });
+  assert.ok(customIdResult.content[0].text.includes("mutually exclusive"), customIdResult.content[0].text);
+  assert.ok(customIdResult.content[0].text.includes("NOT updated"));
+
   await mockAgent.close();
   t.mock.timers.runAll();
   t.mock.timers.reset();

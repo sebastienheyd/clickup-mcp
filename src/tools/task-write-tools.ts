@@ -517,9 +517,8 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
     },
     async ({ task_id, name, description, append_description, status, priority, due_date, start_date, time_estimate, points, tags, parent_task_id, assignees, remove_assignees, blocking, waiting_on, linked_tasks }: any) => {
       try {
-        // Resolve custom task IDs (e.g. "SOI-4422") to internal IDs
-        task_id = await resolveTaskId(task_id);
-
+        // Argument errors are checked before anything hits the network: resolving a
+        // custom task ID costs an API call that would be wasted on a rejected request.
         if (description !== undefined && append_description !== undefined) {
           return {
             content: [{
@@ -528,6 +527,9 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
             }],
           };
         }
+
+        // Resolve custom task IDs (e.g. "SOI-4422") to internal IDs
+        task_id = await resolveTaskId(task_id);
 
         const userData = await getCurrentUser();
 
