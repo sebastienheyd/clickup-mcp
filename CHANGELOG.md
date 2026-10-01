@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.10.1] - 2026-10-01
 
 ### Fixed
 - `getTaskById` no longer drops the whole comment history when a later comment page fails (typically a 429 close to the API limit): the comments already loaded are shown, preceded by a warning that names the failure. The 250-comment paging cap is reported in the output the same way instead of only on stderr.
