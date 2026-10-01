@@ -940,9 +940,16 @@ function convertPriorityToNumber(priority: string): number {
   }
 }
 
-function convertPriorityToString(priority: number): string {
+/**
+ * The task payload carries the priority NAME (`priority: { id: "4", priority: "low" }`),
+ * so a numeric-only lookup turned every real priority into "unknown". Accept both.
+ */
+function convertPriorityToString(priority: number | string | null | undefined): string {
+  if (typeof priority === 'string' && ['urgent', 'high', 'normal', 'low'].includes(priority.toLowerCase())) {
+    return priority.toLowerCase();
+  }
   const priorityMap = { 1: 'urgent', 2: 'high', 3: 'normal', 4: 'low' };
-  return priorityMap[priority as keyof typeof priorityMap] || 'unknown';
+  return priorityMap[Number(priority) as keyof typeof priorityMap] || 'unknown';
 }
 
 function formatTimeEstimate(hours: number): string {
@@ -1138,6 +1145,24 @@ function timestampToIso(timestamp: number | string): string {
   return `${year}-${month}-${day}T${hours}:${minutes}${timezoneOffset}`;
 }
 
+/**
+ * Convert a due/start date parameter for the task API.
+ *
+ * ClickUp drops the time of day unless `due_date_time`/`start_date_time` is true
+ * (verified live: 18:00 came back as 04:00, its all-day placeholder), so report
+ * whether the caller gave a time. A bare date (YYYY-MM-DD) is an all-day value in
+ * local time - `new Date("2026-10-02")` would be UTC midnight, which is the
+ * previous day west of Greenwich.
+ */
+function parseTaskDate(value: string): { timestamp: number; hasTime: boolean } {
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (dateOnly) {
+    const [, year, month, day] = dateOnly;
+    return { timestamp: new Date(Number(year), Number(month) - 1, Number(day)).getTime(), hasTime: false };
+  }
+  return { timestamp: new Date(value).getTime(), hasTime: true };
+}
+
 function buildTaskRequestBody(params: {
   name?: string;
   description?: string;
@@ -1168,11 +1193,23 @@ function buildTaskRequestBody(params: {
   // null clears the value - it must be sent as is, new Date(null) would set 1970-01-01.
   // time_estimate is the exception: ClickUp accepts null but silently keeps the estimate, only 0 clears it.
   if (params.due_date !== undefined) {
-    requestBody.due_date = params.due_date === null ? null : new Date(params.due_date).getTime();
+    if (params.due_date === null) {
+      requestBody.due_date = null;
+    } else {
+      const due = parseTaskDate(params.due_date);
+      requestBody.due_date = due.timestamp;
+      requestBody.due_date_time = due.hasTime;
+    }
   }
 
   if (params.start_date !== undefined) {
-    requestBody.start_date = params.start_date === null ? null : new Date(params.start_date).getTime();
+    if (params.start_date === null) {
+      requestBody.start_date = null;
+    } else {
+      const start = parseTaskDate(params.start_date);
+      requestBody.start_date = start.timestamp;
+      requestBody.start_date_time = start.hasTime;
+    }
   }
 
   if (params.time_estimate !== undefined) {

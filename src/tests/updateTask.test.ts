@@ -455,3 +455,56 @@ test("updateTask removes dependencies read from the flat `dependencies` array", 
   t.mock.timers.runAll();
   t.mock.timers.reset();
 });
+
+test("updateTask keeps the time of day on dates and reports the real priority", async (t) => {
+  t.mock.timers.enable();
+  process.env.CLICKUP_API_KEY = "test-key";
+  process.env.CLICKUP_TEAM_ID = "team1";
+
+  const { registerTaskToolsWrite } = await import("../tools/task-write-tools");
+
+  const mockAgent = new MockAgent();
+  mockAgent.disableNetConnect();
+  setGlobalDispatcher(mockAgent);
+  const client = mockAgent.get("https://api.clickup.com");
+
+  client
+    .intercept({ path: "/api/v2/user", method: "GET" })
+    .reply(200, { user: { id: "u1", username: "me" } });
+  client
+    .intercept({ path: "/api/v2/task/task123?include_markdown_description=true", method: "GET" })
+    .reply(200, { id: "task123", name: "Task", markdown_description: "", status: { status: "open", type: "open" }, assignees: [], url: "https://app.clickup.com/t/task123" });
+
+  let bodyCaptured: any;
+  client
+    .intercept({ path: "/api/v2/task/task123", method: "PUT" })
+    .reply((opts) => {
+      bodyCaptured = JSON.parse(String(opts.body));
+      // The API returns the priority NAME, not its number
+      return { statusCode: 200, data: { id: "task123", name: "Task", status: { status: "open", type: "open" }, assignees: [], url: "https://app.clickup.com/t/task123", priority: { id: "4", priority: "low" } } };
+    });
+
+  const updateTask = registerUpdateTask(registerTaskToolsWrite);
+  const result = await updateTask({
+    task_id: "task123",
+    due_date: "2026-10-02T18:00:00+02:00",
+    start_date: "2026-10-01",
+    priority: "low",
+  });
+
+  // A time of day is only kept by ClickUp with the matching *_time flag
+  assert.equal(bodyCaptured.due_date, Date.parse("2026-10-02T18:00:00+02:00"));
+  assert.equal(bodyCaptured.due_date_time, true);
+  // A bare date is an all-day value at local midnight, without a time
+  assert.equal(bodyCaptured.start_date, new Date(2026, 9, 1).getTime());
+  assert.equal(bodyCaptured.start_date_time, false);
+  assert.equal(bodyCaptured.priority, 4);
+
+  const text = result.content[0].text;
+  assert.ok(text.includes("priority: low"), text);
+  assert.ok(!text.includes("priority: unknown"), text);
+
+  await mockAgent.close();
+  t.mock.timers.runAll();
+  t.mock.timers.reset();
+});
