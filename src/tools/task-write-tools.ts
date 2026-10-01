@@ -506,7 +506,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
       time_estimate: taskTimeEstimateSchema.nullable().describe(taskTimeEstimateSchema.description + CLEAR_HINT),
       points: taskPointsSchema.nullable().describe(taskPointsSchema.description + CLEAR_HINT),
       tags: taskTagsSchema.describe("Optional array of tag names (will replace existing tags)"),
-      parent_task_id: z.string().optional().describe("Optional parent task ID to change parent/child relationships"),
+      parent_task_id: taskIdSchema.optional().describe("Optional parent task ID to move this task under, as a subtask: internal ID (e.g. \"869c4za0g\") or custom ID (e.g. \"SOI-4422\")"),
       assignees: z.array(z.string()).optional().describe("Optional array of user IDs to add as assignees - existing assignees are kept"),
       remove_assignees: z.array(z.string()).optional().describe("Optional array of user IDs to unassign from the task. Combine with assignees to replace one assignee by another."),
       waiting_on: z.array(z.string()).optional().describe("Optional array of task IDs that this task should wait on (will replace existing waiting_on relationships)"),
@@ -547,6 +547,12 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
         [blocking, waiting_on, linked_tasks] = await Promise.all(
           [blocking, waiting_on, linked_tasks].map(resolveTaskIdList)
         );
+
+        // ClickUp's `parent` field only takes an internal ID: a custom ID gets a bare
+        // 500 Internal Server Error (verified live), with nothing to tell what is wrong.
+        if (parent_task_id !== undefined) {
+          parent_task_id = await resolveTaskId(parent_task_id);
+        }
 
         const userData = await getCurrentUser();
 
@@ -794,7 +800,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
       time_estimate: taskTimeEstimateSchema,
       points: taskPointsSchema,
       tags: taskTagsSchema,
-      parent_task_id: z.string().optional().describe("Optional parent task ID to create this as a subtask"),
+      parent_task_id: taskIdSchema.optional().describe("Optional parent task ID to create this as a subtask: internal ID (e.g. \"869c4za0g\") or custom ID (e.g. \"SOI-4422\")"),
       assignees: z.array(z.string()).optional().describe(createAssigneeDescription(userData))
     },
     {
@@ -813,6 +819,13 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
           description,
           "the task was NOT created"
         );
+
+        // ClickUp's `parent` field only takes an internal ID: a custom ID gets a bare
+        // 500 Internal Server Error (verified live). Resolved before the task exists,
+        // so an unknown parent leaves nothing behind.
+        if (parent_task_id !== undefined) {
+          parent_task_id = await resolveTaskId(parent_task_id);
+        }
 
         const userData = await getCurrentUser();
         const currentUserId = userData.user.id;

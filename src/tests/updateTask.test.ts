@@ -586,3 +586,46 @@ test("updateTask refuses an invalid or impossible date before any request", asyn
   t.mock.timers.runAll();
   t.mock.timers.reset();
 });
+
+test("updateTask resolves a custom parent_task_id before sending it as parent", async (t) => {
+  t.mock.timers.enable();
+  process.env.CLICKUP_API_KEY = "test-key";
+  process.env.CLICKUP_TEAM_ID = "team1";
+
+  const { registerTaskToolsWrite } = await import("../tools/task-write-tools");
+
+  const mockAgent = new MockAgent();
+  mockAgent.disableNetConnect();
+  setGlobalDispatcher(mockAgent);
+  const client = mockAgent.get("https://api.clickup.com");
+
+  client
+    .intercept({ path: "/api/v2/task/SOI-10?custom_task_ids=true&team_id=team1", method: "GET" })
+    .reply(200, { id: "parent10" });
+  client
+    .intercept({ path: "/api/v2/user", method: "GET" })
+    .reply(200, { user: { id: "u1", username: "me" } });
+  client
+    .intercept({ path: "/api/v2/task/task123?include_markdown_description=true", method: "GET" })
+    .reply(200, { id: "task123", name: "Task", markdown_description: "", status: { status: "open", type: "open" }, assignees: [], url: "https://app.clickup.com/t/task123" });
+
+  let bodyCaptured: any;
+  client
+    .intercept({ path: "/api/v2/task/task123", method: "PUT" })
+    .reply((opts) => {
+      bodyCaptured = JSON.parse(String(opts.body));
+      return { statusCode: 200, data: { id: "task123", name: "Task", status: { status: "open", type: "open" }, assignees: [], url: "https://app.clickup.com/t/task123", parent: "parent10" } };
+    });
+
+  const updateTask = registerUpdateTask(registerTaskToolsWrite);
+  const result = await updateTask({ task_id: "task123", parent_task_id: "SOI-10" });
+
+  // ClickUp answers a custom ID in `parent` with a bare 500 - only the internal ID works
+  assert.equal(bodyCaptured.parent, "parent10");
+  assert.ok(result.content[0].text.includes("parent_task_id: parent10"), result.content[0].text);
+
+  (mockAgent as any).assertNoPendingInterceptors();
+  await mockAgent.close();
+  t.mock.timers.runAll();
+  t.mock.timers.reset();
+});
