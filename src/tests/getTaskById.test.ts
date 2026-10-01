@@ -374,6 +374,10 @@ test('getTaskById resolves a custom task ID before loading the task', async (t) 
   assert.ok(result.content.some((block: any) =>
     typeof block.text === 'string' && block.text.includes('task_id: task456')
   ));
+  // The custom ID is shown so it can be quoted and reused
+  assert.ok(result.content.some((block: any) =>
+    typeof block.text === 'string' && block.text.includes('custom_id: SOI-4422')
+  ));
 
   (mockAgent as any).assertNoPendingInterceptors();
   await mockAgent.close();

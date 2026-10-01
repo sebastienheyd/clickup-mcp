@@ -340,6 +340,8 @@ export async function generateTaskMetadata(task: any, timeEntries?: any[], isDet
 
   const metadataLines = [
     `task_id: ${task.id}`,
+    // The custom ID (e.g. "PQPS-1234") is what people quote; every tool accepts it
+    ...(task.custom_id ? [`custom_id: ${task.custom_id}`] : []),
     `task_url: ${task.url}`,
     `name: ${task.name}`,
     `status: ${task.status.status}`,
