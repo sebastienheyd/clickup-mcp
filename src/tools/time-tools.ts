@@ -11,6 +11,22 @@ function isoToTimestamp(isoString: string): number {
 }
 
 /**
+ * Convert a date range filter bound. A bare date (YYYY-MM-DD) means the whole
+ * local day: `new Date("2026-10-01")` is UTC midnight, so as an end bound it used
+ * to exclude the very day the summary header announced ("2026-10-01 to 2026-10-01").
+ */
+function dateFilterToTimestamp(value: string, bound: "start" | "end"): number {
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (!dateOnly) {
+    return isoToTimestamp(value);
+  }
+  const [, year, month, day] = dateOnly;
+  return bound === "start"
+    ? new Date(Number(year), Number(month) - 1, Number(day), 0, 0, 0, 0).getTime()
+    : new Date(Number(year), Number(month) - 1, Number(day), 23, 59, 59, 999).getTime();
+}
+
+/**
  * Formats timestamp to ISO string with local timezone (not UTC)
  */
 function timestampToIso(timestamp: number): string {
@@ -66,8 +82,8 @@ export function registerTimeToolsRead(server: McpServer) {
       task_id: z.string().min(1).refine(val => isTaskId(val) || isCustomTaskId(val), {
         message: "Must be an internal task ID (6-16 alphanumeric characters) or a custom task ID (e.g. SOI-4422)"
       }).optional().describe("Optional task ID to filter entries: internal ID (e.g. \"869c4za0g\") or custom ID (e.g. \"SOI-4422\"). If not provided, returns all user's time entries."),
-      start_date: z.string().optional().describe("Optional start date filter as ISO date string (e.g., '2024-10-06T00:00:00+02:00'). Defaults to 30 days ago."),
-      end_date: z.string().optional().describe("Optional end date filter as ISO date string (e.g., '2024-10-06T23:59:59+02:00'). Defaults to current date."),
+      start_date: z.string().optional().describe("Optional start date filter as ISO date string (e.g., '2024-10-06T00:00:00+02:00') or a bare date (e.g., '2024-10-06', from the start of that local day). Defaults to 30 days ago."),
+      end_date: z.string().optional().describe("Optional end date filter as ISO date string (e.g., '2024-10-06T23:59:59+02:00') or a bare date (e.g., '2024-10-06', up to the end of that local day). Defaults to current date."),
       list_id: z.string().optional().describe("Optional single list ID to filter time entries by a specific list"),
       space_id: z.string().optional().describe("Optional single space ID to filter time entries by a specific space"),
       include_all_users: z.boolean().optional().describe("Optional flag to include time entries from all team members (default: false, only current user)")
@@ -85,11 +101,11 @@ export function registerTimeToolsRead(server: McpServer) {
         }
 
         if (start_date) {
-          params.append('start_date', isoToTimestamp(start_date).toString());
+          params.append('start_date', dateFilterToTimestamp(start_date, "start").toString());
         }
 
         if (end_date) {
-          params.append('end_date', isoToTimestamp(end_date).toString());
+          params.append('end_date', dateFilterToTimestamp(end_date, "end").toString());
         }
 
         // Add single list_id or space_id filter (not both)
