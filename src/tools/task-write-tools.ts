@@ -1211,9 +1211,18 @@ async function updateTaskDependencies(
 ): Promise<string[]> {
   const errors: string[] = [];
   
-  // Get current dependencies
-  const currentBlocking = taskData.blocking?.map((dep: any) => dep.id) || [];
-  const currentWaitingOn = taskData.waiting_on?.map((dep: any) => dep.id) || [];
+  // Get current dependencies. The task payload has no `blocking`/`waiting_on`
+  // arrays (verified live): both directions live in one flat `dependencies` array
+  // of `{ task_id, depends_on }` records, and this task can sit on either side.
+  // Reading the missing fields made every current dependency look absent, so
+  // `waiting_on: []`/`blocking: []` never removed anything and reported no error.
+  const dependencyRecords: any[] = Array.isArray(taskData.dependencies) ? taskData.dependencies : [];
+  const currentWaitingOn: string[] = dependencyRecords
+    .filter((dep: any) => dep.task_id === taskId && dep.depends_on)
+    .map((dep: any) => dep.depends_on);
+  const currentBlocking: string[] = dependencyRecords
+    .filter((dep: any) => dep.depends_on === taskId && dep.task_id)
+    .map((dep: any) => dep.task_id);
   // `linked_tasks` entries are link records, not tasks: each has `task_id` and
   // `link_id` (the two ends of the link) and no `id` at all. Mapping `.id` here
   // produced `[undefined, ...]`, so every existing link looked like it was no

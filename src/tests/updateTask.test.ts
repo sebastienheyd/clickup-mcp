@@ -396,3 +396,62 @@ test("updateTask clears the description with an empty string", async (t) => {
   t.mock.timers.runAll();
   t.mock.timers.reset();
 });
+
+test("updateTask removes dependencies read from the flat `dependencies` array", async (t) => {
+  t.mock.timers.enable();
+  process.env.CLICKUP_API_KEY = "test-key";
+  process.env.CLICKUP_TEAM_ID = "team1";
+
+  const { registerTaskToolsWrite } = await import("../tools/task-write-tools");
+
+  const mockAgent = new MockAgent();
+  mockAgent.disableNetConnect();
+  setGlobalDispatcher(mockAgent);
+  const client = mockAgent.get("https://api.clickup.com");
+
+  client
+    .intercept({ path: "/api/v2/user", method: "GET" })
+    .reply(200, { user: { id: "u1", username: "me" } });
+
+  // The task payload has no `blocking`/`waiting_on` arrays: both directions are
+  // records of one `dependencies` array, with this task on either side.
+  const dependencies = [
+    { task_id: "task123", depends_on: "waitme", type: 1 },
+    { task_id: "blockme", depends_on: "task123", type: 1 },
+    { task_id: "task123", depends_on: "keepwaiting", type: 1 },
+  ];
+  client
+    .intercept({ path: "/api/v2/task/task123?include_markdown_description=true", method: "GET" })
+    .reply(200, { id: "task123", name: "Task", markdown_description: "", status: { status: "open", type: "open" }, assignees: [], url: "https://app.clickup.com/t/task123", dependencies });
+
+  const removed: string[] = [];
+  client
+    .intercept({ path: "/api/v2/task/task123/dependency?depends_on=waitme", method: "DELETE" })
+    .reply(() => {
+      removed.push("task123 waiting on waitme");
+      return { statusCode: 200, data: {} };
+    });
+  client
+    .intercept({ path: "/api/v2/task/blockme/dependency?depends_on=task123", method: "DELETE" })
+    .reply(() => {
+      removed.push("blockme waiting on task123");
+      return { statusCode: 200, data: {} };
+    });
+  client
+    .intercept({ path: "/api/v2/task/task123", method: "GET" })
+    .reply(200, { id: "task123", name: "Task", status: { status: "open", type: "open" }, assignees: [], url: "https://app.clickup.com/t/task123", dependencies: [dependencies[2]] });
+
+  const updateTask = registerUpdateTask(registerTaskToolsWrite);
+  // `keepwaiting` is still requested, so it is neither removed nor re-added: no
+  // POST is intercepted, so a re-add attempt would surface as a warning.
+  const result = await updateTask({ task_id: "task123", waiting_on: ["keepwaiting"], blocking: [] });
+
+  assert.deepEqual(removed.sort(), ["blockme waiting on task123", "task123 waiting on waitme"]);
+  const text = result.content[0].text;
+  assert.ok(text.includes("Task updated successfully"), text);
+  assert.ok(!text.includes("dependency_warnings"), text);
+
+  await mockAgent.close();
+  t.mock.timers.runAll();
+  t.mock.timers.reset();
+});
