@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+Found by live-testing the published 1.10.1 against a real workspace.
+- `updateTask` can remove dependencies again: `waiting_on` and `blocking` were compared with task fields the API never returns (`blocking`/`waiting_on`), so every existing dependency looked absent - `waiting_on: []` removed nothing, reported no error, and a kept dependency was re-added. Current dependencies are now read from the flat `dependencies` array.
+- `editComment` keeps the images already in a comment. Read-back images were re-embedded with the filename as attachment id, which ClickUp rejects (`404 ACCESS_028`); the stored attachment object of the comment is now reused. Adding any other image is refused by ClickUp on edit (`401 ACCESS_610`), so such a reference is now rejected before anything is uploaded - previously the upload happened first and left an orphan attachment behind the failed edit.
+- Re-embedding an existing ClickUp attachment URL in `addComment` uses the real attachment id (`<uuid><ext>` from the CDN path) instead of the filename.
+- `createTask` and `updateTask` keep the time of day of `due_date` and `start_date`: `due_date_time`/`start_date_time` were never sent, so ClickUp stored 18:00 as its 04:00 all-day placeholder. A bare date (`YYYY-MM-DD`) is now an all-day value at local midnight.
+- `getTaskById` and `searchTasks` show the task's `custom_id` (e.g. `PQPS-1234`).
+- Task responses report the real priority instead of `unknown`: the API returns the priority name, the conversion only accepted numbers.
+- `getTimeEntries` treats a bare date (`YYYY-MM-DD`) as the whole local day: `end_date: "2026-10-01"` meant UTC midnight and excluded the very day the summary announced.
+- `editComment`/`deleteComment` stop paging the comment list after a short page instead of requesting one more empty page, and API errors are no longer prefixed twice (`Error editing comment: Error editing comment: ...`).
+
 ## [1.10.1] - 2026-10-01
 
 ### Fixed
