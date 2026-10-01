@@ -308,8 +308,8 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
         "ClickUp shows no 'edited' marker, so people who already read the comment will not notice the change - for anything that changes meaning after a discussion has started, prefer a follow-up comment.",
         "Editing does not reset the creation date, so the edit window does not get extended by editing.",
         COMMENT_FORMATTING_HINT,
-        IMAGE_SUPPORT_HINT,
-        "IMAGES ON EDIT: reading a comment (getTaskById) returns its images as markdown, so passing that text back keeps them - an existing ClickUp attachment URL is re-embedded without uploading again. Only an image whose markdown you drop disappears.",
+        "IMAGES ON EDIT: an edit can only KEEP the images already in this comment. Reading the comment (getTaskById) returns them as markdown, and passing that markdown back keeps them; an image whose markdown you drop disappears.",
+        "ClickUp refuses to add any other image to an existing comment - a new file, a data URI, a web URL, or an image of another comment or of the task description - so such a reference is rejected before anything is uploaded. To share a new image, post a new comment with addComment.",
         "Task URLs (https://app.clickup.com/t/TASK_ID) become live task references, and existing references are read back as such URLs - passing the text back keeps them.",
       ];
 
@@ -342,15 +342,15 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
 
         assertCommentIsEditable(existing, userData.user.id);
 
-        // Same pipeline as addComment - the undocumented rich `comment` array is
-        // accepted by PUT too, so formatting and images survive an edit. Images are
-        // resolved and uploaded before the PUT, so a broken reference leaves the
-        // existing comment untouched.
+        // Same converter as addComment - the undocumented rich `comment` array is
+        // accepted by PUT too, so formatting survives an edit. Images are different:
+        // ClickUp only lets an edit keep the comment's OWN images, so they are
+        // matched against the stored fragments and nothing is ever uploaded here.
         const abortNotice = "the comment was NOT changed";
-        const { markdown, images } = await resolveImagesOrAbort(comment, abortNotice);
-        const uploaded = await uploadImagesOrAbort(task_id, images, abortNotice);
+        const markdown = normalizeImageDestinations(comment);
+        const keptImages = keepOwnCommentImages(existing, markdown, abortNotice);
 
-        const commentBlocks = convertMarkdownToClickUpBlocks(markdown, toAttachmentMap(uploaded));
+        const commentBlocks = convertMarkdownToClickUpBlocks(markdown, toAttachmentMap(keptImages));
 
         // Only `comment` is sent: sending `comment_text` alongside it appends that
         // string to the blocks instead of being ignored.
@@ -380,7 +380,10 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
                 `created: ${timestampToIso(existing.date)} (unchanged by the edit)`,
                 `previous_text: ${existing.comment_text || '(no plain text available)'}`,
                 `new_comment: ${summarizeMarkdownForEcho(comment)}`,
-                ...formatAttachedImages(uploaded),
+                ...(keptImages.length > 0 ? [
+                  `images_kept: ${keptImages.length}`,
+                  ...keptImages.map((k) => `  - ${k.attachment.name} (${k.attachment.url})`),
+                ] : []),
               ].join('\n')
             }
           ],
@@ -946,6 +949,80 @@ function formatTimeEstimate(hours: number): string {
   const displayHours = Math.floor(hours);
   const displayMinutes = Math.round((hours - displayHours) * 60);
   return displayHours > 0 ? `${displayHours}h ${displayMinutes}m` : `${displayMinutes}m`;
+}
+
+/**
+ * Match the image references of an edited comment against the images the comment
+ * already contains, and return the stored attachment object for each of them.
+ *
+ * Verified live on `PUT /comment/{id}`: an image fragment is only accepted when it
+ * carries the real attachment of an image that is ALREADY in that comment. Any
+ * other attachment - a fresh upload, the task description's image, an image of
+ * another comment - is refused with 401 ACCESS_610, and a fragment whose id is not
+ * a real attachment id fails with 404 ACCESS_028. Reusing the stored object (real
+ * id, dimensions included) is therefore the only working way to keep an image, and
+ * anything else is rejected here, before a request is made - uploading first would
+ * only leave an orphan attachment on the task behind the failed edit.
+ */
+function keepOwnCommentImages(
+  existing: ExistingComment,
+  markdown: string,
+  abortNotice: string
+): UploadedMarkdownImage[] {
+  const sources = collectMarkdownImageSources(markdown);
+  if (sources.length === 0) {
+    return [];
+  }
+
+  const ownImages = new Map<string, any>();
+  for (const fragment of existing.comment ?? []) {
+    if (fragment?.type === "image" && fragment.image?.url) {
+      ownImages.set(normalizeUrl(fragment.image.url), fragment.image);
+    }
+  }
+
+  const kept: UploadedMarkdownImage[] = [];
+  const refused: string[] = [];
+  const seen = new Set<string>();
+  for (const { src } of sources) {
+    if (seen.has(src)) {
+      continue;
+    }
+    seen.add(src);
+    const stored = ownImages.get(normalizeUrl(src));
+    if (stored) {
+      kept.push({ src, attachment: stored });
+    } else {
+      refused.push(src);
+    }
+  }
+
+  if (refused.length > 0) {
+    throw new Error(
+      [
+        `${refused.length} image reference(s) are not images of this comment, so ${abortNotice}:`,
+        ...refused.map((src) => `  - ${summarizeImageSource(src)}`),
+        `ClickUp only lets an edit keep the images already in the comment - it refuses to add any other image.`,
+        `Remove these references, or post the new image in a new comment with addComment.`,
+      ].join("\n")
+    );
+  }
+
+  return kept;
+}
+
+/** Compare attachment URLs regardless of percent-encoding of the filename */
+function normalizeUrl(url: string): string {
+  try {
+    return decodeURI(url.trim());
+  } catch {
+    return url.trim();
+  }
+}
+
+/** Shorten a data URI so an error message never repeats a base64 payload */
+function summarizeImageSource(src: string): string {
+  return src.startsWith("data:") ? `${src.slice(0, 40)}... (data URI)` : src;
 }
 
 /**

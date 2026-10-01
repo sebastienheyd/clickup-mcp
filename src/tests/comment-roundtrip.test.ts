@@ -56,6 +56,26 @@ test("a comment read back as markdown keeps its image when passed to editComment
           id: "c1",
           date: String(Date.now() - 60 * 1000),
           comment_text: "Ist umgesetzt:",
+          // As ClickUp stores it: the image fragment carries the real attachment
+          // id (`<uuid>.<ext>`), which is the only one a PUT accepts.
+          comment: [
+            { text: "Ist umgesetzt:\n" },
+            {
+              type: "image",
+              text: "screenshot.png",
+              image: {
+                id: "abc-def.png",
+                name: "screenshot.png",
+                title: "screenshot.png",
+                extension: "png",
+                url: ATTACHMENT_URL,
+                thumbnail_large: ATTACHMENT_URL,
+                width: 640,
+                height: 480,
+              },
+            },
+            { text: "\nBitte prüfen.\n" },
+          ],
           user: { id: 42, username: "me" },
         },
       ],
@@ -95,6 +115,8 @@ test("a comment read back as markdown keeps its image when passed to editComment
   const imageFragment = bodyCaptured.comment.find((b: any) => b.type === "image");
   assert.ok(imageFragment, "the edited comment must still contain an image fragment");
   assert.equal(imageFragment.image.url, ATTACHMENT_URL, "same attachment, not a new upload");
+  assert.equal(imageFragment.image.id, "abc-def.png", "the stored attachment id is reused - ClickUp rejects any other id");
+  assert.equal(imageFragment.image.width, 640, "the stored attachment object is reused as is");
   assert.equal(imageFragment.image.name, "screenshot.png", "the displayed filename survives");
 
   await mockAgent.close();

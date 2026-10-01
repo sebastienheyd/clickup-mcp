@@ -48,7 +48,7 @@
     },
     {
       "name": "editComment",
-      "description": "Replace the text of an own task comment within a configurable time window (default 24 hours) instead of posting a follow-up comment. Formatting and images are preserved; comments by other users and older comments are refused."
+      "description": "Replace the text of an own task comment within a configurable time window (default 24 hours) instead of posting a follow-up comment. Formatting and the comment's own images are preserved (ClickUp refuses new images on edit); comments by other users and older comments are refused."
     },
     {
       "name": "deleteComment",

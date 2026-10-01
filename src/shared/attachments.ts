@@ -318,12 +318,18 @@ export async function uploadResolvedImages(
     try {
       if (resolved.kind === "existing") {
         // Already on ClickUp's CDN - synthesise the minimal attachment shape so
-        // the fragment builder has something to work with.
-        const name = decodeURIComponent(basename(new URL(resolved.url).pathname));
+        // the fragment builder has something to work with. The real attachment id
+        // is `<uuid><ext>`, the uuid being the path segment before the filename
+        // (.../t123/<uuid>/<name>); ClickUp rejects a comment edit whose image
+        // fragment carries any other id (404 ACCESS_028, verified live).
+        const pathname = new URL(resolved.url).pathname;
+        const name = decodeURIComponent(basename(pathname));
+        const segments = pathname.split("/").filter(Boolean);
+        const uuid = segments.length >= 2 ? segments[segments.length - 2] : undefined;
         uploaded.push({
           src,
           attachment: {
-            id: name,
+            id: uuid ? `${uuid}${extname(name)}` : name,
             name,
             title: alt || name,
             extension: extname(name).replace(/^\./, "") || undefined,

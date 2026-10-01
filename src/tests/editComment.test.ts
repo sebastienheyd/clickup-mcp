@@ -285,3 +285,86 @@ test("editComment keeps the old comment when an image is broken", async (t) => {
   t.mock.timers.runAll();
   t.mock.timers.reset();
 });
+
+test("editComment refuses an image that is not already in the comment, before any upload", async (t) => {
+  enableTimers(t);
+  process.env.CLICKUP_API_KEY = "test-key";
+  process.env.CLICKUP_TEAM_ID = "team1";
+  const { registerTaskToolsWrite } = await import("../tools/task-write-tools");
+
+  const ownImageUrl = "https://t123.p.clickup-attachments.com/t123/own-uuid/own.png";
+  const otherImageUrl = "https://t123.p.clickup-attachments.com/t123/other-uuid/other.png";
+  const { mockAgent } = setupClient([
+    ownComment({
+      comment: [
+        { text: "Original text\n" },
+        { type: "image", text: "own", image: { id: "own-uuid.png", name: "own.png", url: ownImageUrl } },
+      ],
+    }),
+  ]);
+  // Neither an attachment upload nor the PUT is intercepted: ClickUp refuses to
+  // add any image to an existing comment, so nothing may be sent at all.
+
+  const tools: Record<string, any> = {};
+  registerTaskToolsWrite(makeServerStub(tools), { user: { username: "me", id: 42 } });
+
+  const result = await tools.editComment({
+    task_id: "task123",
+    comment_id: "c1",
+    comment: `Kept ![own](${ownImageUrl}) and new ![shot](/tmp/new-screenshot.png) and ![other](${otherImageUrl})`,
+  });
+
+  const text = result.content[0].text;
+  assert.ok(/2 image reference\(s\) are not images of this comment, so the comment was NOT changed/.test(text), text);
+  assert.ok(text.includes("/tmp/new-screenshot.png"), text);
+  assert.ok(text.includes(otherImageUrl), text);
+  assert.ok(!text.includes(`- ${ownImageUrl}`), "the comment's own image is not refused");
+  assert.ok(/post the new image in a new comment with addComment/.test(text), text);
+
+  await mockAgent.close();
+  t.mock.timers.runAll();
+  t.mock.timers.reset();
+});
+
+test("editComment keeps the comment's own image with its stored attachment object", async (t) => {
+  enableTimers(t);
+  process.env.CLICKUP_API_KEY = "test-key";
+  process.env.CLICKUP_TEAM_ID = "team1";
+  const { registerTaskToolsWrite } = await import("../tools/task-write-tools");
+
+  // Stored URL is percent-encoded; the read-back markdown may carry it either way
+  const storedUrl = "https://t123.p.clickup-attachments.com/t123/9f2a-uuid/Image%20de%20test.png";
+  const stored = { id: "9f2a-uuid.png", name: "Image de test.png", title: "Image de test", extension: "png", url: storedUrl, width: 240, height: 80 };
+  const { mockAgent, client } = setupClient([
+    ownComment({ comment: [{ text: "Original\n" }, { type: "image", text: "Image de test", image: stored }] }),
+  ]);
+
+  let bodyCaptured: any;
+  client
+    .intercept({ path: "/api/v2/comment/c1", method: "PUT" })
+    .reply((opts) => {
+      bodyCaptured = JSON.parse(String(opts.body));
+      return { statusCode: 200, data: {} };
+    });
+
+  const tools: Record<string, any> = {};
+  registerTaskToolsWrite(makeServerStub(tools), { user: { username: "me", id: 42 } });
+
+  const result = await tools.editComment({
+    task_id: "task123",
+    comment_id: "c1",
+    comment: "Updated text\n\n![Image de test](https://t123.p.clickup-attachments.com/t123/9f2a-uuid/Image de test.png)",
+  });
+
+  const text = result.content[0].text;
+  assert.ok(text.includes("Comment edited successfully"), text);
+  assert.ok(text.includes("images_kept: 1"), text);
+  const fragment = bodyCaptured.comment.find((b: any) => b.type === "image");
+  assert.equal(fragment.image.id, "9f2a-uuid.png", "the real attachment id must be sent");
+  assert.equal(fragment.image.url, storedUrl);
+  assert.equal(fragment.image.width, 240);
+
+  await mockAgent.close();
+  t.mock.timers.runAll();
+  t.mock.timers.reset();
+});

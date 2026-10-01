@@ -99,12 +99,18 @@ async function main() {
   check("all tools have an object inputSchema", malformed.length === 0,
     malformed.map((t: any) => t.name).join(", "));
 
-  const writeTools = ["addComment", "editComment", "createTask", "updateTask"];
+  const writeTools = ["addComment", "createTask", "updateTask"];
   for (const name of writeTools) {
     const tool = tools.find((t: any) => t.name === name);
     check(`${name} documents image support`,
       /local file path/i.test(tool?.description || ""));
   }
+  // ClickUp refuses new images on a comment edit, so editComment must say that it
+  // only keeps the comment's own images instead of advertising uploads
+  const editComment = tools.find((t: any) => t.name === "editComment");
+  check("editComment documents that it only keeps the comment's own images",
+    /only KEEP the images already in this comment/.test(editComment?.description || "") &&
+    !/local file path/i.test(editComment?.description || ""));
 
   if (taskId && imagePath) {
     const comment = [

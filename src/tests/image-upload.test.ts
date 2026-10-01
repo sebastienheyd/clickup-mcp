@@ -194,6 +194,8 @@ test("addComment reuses an existing ClickUp attachment URL without re-uploading"
   assert.ok(fragment, "existing URL should still become an image fragment");
   assert.equal(fragment.image.url, CDN_URL);
   assert.equal(fragment.image.title, "Schon hochgeladen");
+  // The real attachment id is `<uuid><ext>` taken from the CDN path, not the filename
+  assert.equal(fragment.image.id, "abc-def.png");
 
   await h.close();
 });

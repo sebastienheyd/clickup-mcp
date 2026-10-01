@@ -313,7 +313,7 @@ This keeps existing content and a clear audit trail. To correct or restructure a
 
 ## Writing Images Into Tickets
 
-`addComment`, `editComment`, `createTask` and `updateTask` accept images as ordinary markdown. Because
+`addComment`, `createTask` and `updateTask` accept images as ordinary markdown. Because
 this server runs locally, it reads the file itself - so a **local path is enough**:
 
 ```markdown
@@ -336,12 +336,16 @@ Notes:
 - **An image inside a numbered list breaks ClickUp's numbering.** Write walkthrough
   steps as bold lines with the image between them, as above.
 - Only real PNG/JPEG/GIF/WebP files are uploaded - the content is checked, not the
-  extension. A file that fails **aborts the write**: `addComment`, `editComment` and
+  extension. A file that fails **aborts the write**: `addComment` and
   `updateTask` report every broken reference and change nothing, so the markdown can be
   fixed and the call retried without creating duplicates. `createTask` validates its
   images before creating the task; only an upload failing afterwards is reported as a
   warning, since the task already exists at that point.
 - Attachments always belong to a task, so document pages cannot embed uploads this way.
+- **`editComment` can only keep the images already in the comment.** Pass the markdown
+  returned by `getTaskById` back and they stay; ClickUp refuses to add any other image to
+  an existing comment, so a new image reference is rejected before anything is uploaded.
+  Share a new image in a new comment with `addComment` instead.
 
 ## Performance & Limitations
 
