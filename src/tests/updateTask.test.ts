@@ -509,6 +509,56 @@ test("updateTask keeps the time of day on dates and reports the real priority", 
   t.mock.timers.reset();
 });
 
+test("updateTask resolves custom IDs in relation lists before comparing them", async (t) => {
+  t.mock.timers.enable();
+  process.env.CLICKUP_API_KEY = "test-key";
+  process.env.CLICKUP_TEAM_ID = "team1";
+
+  const { registerTaskToolsWrite } = await import("../tools/task-write-tools");
+
+  const mockAgent = new MockAgent();
+  mockAgent.disableNetConnect();
+  setGlobalDispatcher(mockAgent);
+  const client = mockAgent.get("https://api.clickup.com");
+
+  // SOI-1 and SOI-2 are the custom IDs of the tasks already related to task123
+  client
+    .intercept({ path: "/api/v2/task/SOI-1?custom_task_ids=true&team_id=team1", method: "GET" })
+    .reply(200, { id: "waitme1" });
+  client
+    .intercept({ path: "/api/v2/task/SOI-2?custom_task_ids=true&team_id=team1", method: "GET" })
+    .reply(200, { id: "linkme2" });
+  client
+    .intercept({ path: "/api/v2/user", method: "GET" })
+    .reply(200, { user: { id: "u1", username: "me" } });
+  client
+    .intercept({ path: "/api/v2/task/task123?include_markdown_description=true", method: "GET" })
+    .reply(200, {
+      id: "task123", name: "Task", markdown_description: "", status: { status: "open", type: "open" }, assignees: [], url: "https://app.clickup.com/t/task123",
+      dependencies: [{ task_id: "task123", depends_on: "waitme1", type: 1 }],
+      linked_tasks: [{ task_id: "task123", link_id: "linkme2" }],
+    });
+  client
+    .intercept({ path: "/api/v2/task/task123", method: "GET" })
+    .reply(200, { id: "task123", name: "Task", status: { status: "open", type: "open" }, assignees: [], url: "https://app.clickup.com/t/task123" });
+
+  const updateTask = registerUpdateTask(registerTaskToolsWrite);
+  // The same relations, given by custom ID (twice for SOI-1): nothing may be removed
+  // or re-added - no DELETE or POST is intercepted, so any attempt shows up as a
+  // dependency warning or a failed request.
+  const result = await updateTask({ task_id: "task123", waiting_on: ["SOI-1", "SOI-1"], linked_tasks: ["SOI-2"] });
+
+  const text = result.content[0].text;
+  assert.ok(text.includes("Task updated successfully"), text);
+  assert.ok(!text.includes("dependency_warnings"), text);
+  assert.ok(text.includes("waiting_on: waitme1"), text);
+
+  (mockAgent as any).assertNoPendingInterceptors();
+  await mockAgent.close();
+  t.mock.timers.runAll();
+  t.mock.timers.reset();
+});
+
 test("updateTask refuses an invalid or impossible date before any request", async (t) => {
   t.mock.timers.enable();
   process.env.CLICKUP_API_KEY = "test-key";

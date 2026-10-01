@@ -539,6 +539,15 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
         // Resolve custom task IDs (e.g. "SOI-4422") to internal IDs
         task_id = await resolveTaskId(task_id);
 
+        // Current dependencies and links come back from ClickUp with internal IDs,
+        // so the requested lists must use them too: an unresolved "SOI-4422" would
+        // not match its own internal ID, and the existing relation would be removed
+        // as "no longer requested" while a duplicate is added. Resolved up front, so
+        // an unknown custom ID aborts the update before anything is written.
+        [blocking, waiting_on, linked_tasks] = await Promise.all(
+          [blocking, waiting_on, linked_tasks].map(resolveTaskIdList)
+        );
+
         const userData = await getCurrentUser();
 
         // Get task details including current markdown description
@@ -1170,6 +1179,16 @@ function assertValidTaskDates(dates: { due_date?: string | null; start_date?: st
       parseTaskDate(value, field);
     }
   }
+}
+
+/** Resolve every ID of a relation list to an internal ID, without duplicates */
+async function resolveTaskIdList(ids: string[] | undefined): Promise<string[] | undefined> {
+  if (ids === undefined) {
+    return undefined;
+  }
+  // Deduplicate before resolving too: each custom ID costs one API call
+  const resolved = await Promise.all([...new Set(ids)].map((id) => resolveTaskId(id)));
+  return [...new Set(resolved)];
 }
 
 function buildTaskRequestBody(params: {
