@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { CONFIG } from "../shared/config";
 import { getAllTeamMembers, getCurrentUser, isTaskId, isCustomTaskId, resolveTaskId } from "../shared/utils";
+import { parseDateInput } from "../shared/dates";
 
 /**
  * Converts ISO date string to Unix timestamp in milliseconds
@@ -14,16 +15,10 @@ function isoToTimestamp(isoString: string): number {
  * Convert a date range filter bound. A bare date (YYYY-MM-DD) means the whole
  * local day: `new Date("2026-10-01")` is UTC midnight, so as an end bound it used
  * to exclude the very day the summary header announced ("2026-10-01 to 2026-10-01").
+ * Invalid or impossible dates throw instead of sending `NaN` to the API.
  */
 function dateFilterToTimestamp(value: string, bound: "start" | "end"): number {
-  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
-  if (!dateOnly) {
-    return isoToTimestamp(value);
-  }
-  const [, year, month, day] = dateOnly;
-  return bound === "start"
-    ? new Date(Number(year), Number(month) - 1, Number(day), 0, 0, 0, 0).getTime()
-    : new Date(Number(year), Number(month) - 1, Number(day), 23, 59, 59, 999).getTime();
+  return parseDateInput(value, bound === "start" ? "start_date" : "end_date", bound).timestamp;
 }
 
 /**

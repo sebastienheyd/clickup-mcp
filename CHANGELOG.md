@@ -16,6 +16,7 @@ Found by live-testing the published 1.10.1 against a real workspace.
 - `getTaskById` and `searchTasks` show the task's `custom_id` (e.g. `PQPS-1234`).
 - Task responses report the real priority instead of `unknown`: the API returns the priority name, the conversion only accepted numbers.
 - `getTimeEntries` treats a bare date (`YYYY-MM-DD`) as the whole local day: `end_date: "2026-10-01"` meant UTC midnight and excluded the very day the summary announced.
+- Invalid or impossible dates (`"demain"`, `2026-02-31`, also with a time of day) are rejected with an error naming the field. `createTask`/`updateTask` used to send them as `null`, which cleared the date while reporting success, JavaScript rolled impossible days over to the next month, and `getTimeEntries` sent `NaN` to the API.
 - `editComment`/`deleteComment` stop paging the comment list after a short page instead of requesting one more empty page, and API errors are no longer prefixed twice (`Error editing comment: Error editing comment: ...`).
 
 ## [1.10.1] - 2026-10-01

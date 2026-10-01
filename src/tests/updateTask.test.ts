@@ -508,3 +508,31 @@ test("updateTask keeps the time of day on dates and reports the real priority", 
   t.mock.timers.runAll();
   t.mock.timers.reset();
 });
+
+test("updateTask refuses an invalid or impossible date before any request", async (t) => {
+  t.mock.timers.enable();
+  process.env.CLICKUP_API_KEY = "test-key";
+  process.env.CLICKUP_TEAM_ID = "team1";
+
+  const { registerTaskToolsWrite } = await import("../tools/task-write-tools");
+
+  // No intercepts at all: the date must be rejected before the first request
+  const mockAgent = new MockAgent();
+  mockAgent.disableNetConnect();
+  setGlobalDispatcher(mockAgent);
+
+  const updateTask = registerUpdateTask(registerTaskToolsWrite);
+
+  const unparseable = await updateTask({ task_id: "task123", due_date: "demain" });
+  assert.ok(/Invalid due_date "demain"/.test(unparseable.content[0].text), unparseable.content[0].text);
+
+  // JavaScript would roll these over to March 3rd instead of rejecting them
+  for (const value of ["2026-02-31", "2026-02-31T10:00:00+02:00"]) {
+    const result = await updateTask({ task_id: "task123", start_date: value });
+    assert.ok(/Invalid start_date .* is not a calendar date/.test(result.content[0].text), result.content[0].text);
+  }
+
+  await mockAgent.close();
+  t.mock.timers.runAll();
+  t.mock.timers.reset();
+});

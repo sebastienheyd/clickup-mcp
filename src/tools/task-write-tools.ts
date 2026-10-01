@@ -23,6 +23,7 @@ import {
   fetchCommentPage,
   findTopLevelComment,
 } from "../shared/comments";
+import { parseDateInput } from "../shared/dates";
 
 /**
  * Shared wording for the image support of every markdown field in this file.
@@ -530,6 +531,10 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
             }],
           };
         }
+
+        // A malformed date must be refused before anything is written: it would
+        // otherwise be sent as null and clear the date (see parseDateInput).
+        assertValidTaskDates({ due_date, start_date });
 
         // Resolve custom task IDs (e.g. "SOI-4422") to internal IDs
         task_id = await resolveTaskId(task_id);
@@ -1150,17 +1155,21 @@ function timestampToIso(timestamp: number | string): string {
  *
  * ClickUp drops the time of day unless `due_date_time`/`start_date_time` is true
  * (verified live: 18:00 came back as 04:00, its all-day placeholder), so report
- * whether the caller gave a time. A bare date (YYYY-MM-DD) is an all-day value in
- * local time - `new Date("2026-10-02")` would be UTC midnight, which is the
- * previous day west of Greenwich.
+ * whether the caller gave a time. A bare date (YYYY-MM-DD) is an all-day value at
+ * local midnight. Invalid or impossible dates throw instead of being sent as null.
  */
-function parseTaskDate(value: string): { timestamp: number; hasTime: boolean } {
-  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
-  if (dateOnly) {
-    const [, year, month, day] = dateOnly;
-    return { timestamp: new Date(Number(year), Number(month) - 1, Number(day)).getTime(), hasTime: false };
+function parseTaskDate(value: string, field: string): { timestamp: number; hasTime: boolean } {
+  return parseDateInput(value, field, "start");
+}
+
+/** Validate due/start dates up front so a bad value never reaches a write */
+function assertValidTaskDates(dates: { due_date?: string | null; start_date?: string | null }): void {
+  for (const field of ["due_date", "start_date"] as const) {
+    const value = dates[field];
+    if (typeof value === "string") {
+      parseTaskDate(value, field);
+    }
   }
-  return { timestamp: new Date(value).getTime(), hasTime: true };
 }
 
 function buildTaskRequestBody(params: {
@@ -1196,7 +1205,7 @@ function buildTaskRequestBody(params: {
     if (params.due_date === null) {
       requestBody.due_date = null;
     } else {
-      const due = parseTaskDate(params.due_date);
+      const due = parseTaskDate(params.due_date, 'due_date');
       requestBody.due_date = due.timestamp;
       requestBody.due_date_time = due.hasTime;
     }
@@ -1206,7 +1215,7 @@ function buildTaskRequestBody(params: {
     if (params.start_date === null) {
       requestBody.start_date = null;
     } else {
-      const start = parseTaskDate(params.start_date);
+      const start = parseTaskDate(params.start_date, 'start_date');
       requestBody.start_date = start.timestamp;
       requestBody.start_date_time = start.hasTime;
     }

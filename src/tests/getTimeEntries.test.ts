@@ -92,3 +92,33 @@ test("getTimeEntries treats a bare end date as the whole local day", async (t) =
   t.mock.timers.runAll();
   t.mock.timers.reset();
 });
+
+test("getTimeEntries refuses an invalid filter date instead of sending NaN", async (t) => {
+  t.mock.timers.enable();
+  process.env.CLICKUP_API_KEY = "test-key";
+  process.env.CLICKUP_TEAM_ID = "team1";
+  const { registerTimeToolsRead } = await import("../tools/time-tools");
+
+  // No intercepts: the date must be rejected before the request
+  const mockAgent = new MockAgent();
+  mockAgent.disableNetConnect();
+  setGlobalDispatcher(mockAgent);
+
+  const tools: Record<string, any> = {};
+  const serverStub = {
+    tool: (name: string, _desc: string, _schema: any, _opts: any, handler: any) => {
+      tools[name] = handler;
+    },
+  } as any;
+  registerTimeToolsRead(serverStub);
+
+  const impossible = await tools.getTimeEntries({ task_id: "task01", end_date: "2026-02-31" });
+  assert.ok(/Invalid end_date "2026-02-31": .* is not a calendar date/.test(impossible.content[0].text), impossible.content[0].text);
+
+  const unparseable = await tools.getTimeEntries({ task_id: "task01", start_date: "last week" });
+  assert.ok(/Invalid start_date "last week"/.test(unparseable.content[0].text), unparseable.content[0].text);
+
+  await mockAgent.close();
+  t.mock.timers.runAll();
+  t.mock.timers.reset();
+});
