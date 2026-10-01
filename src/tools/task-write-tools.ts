@@ -258,7 +258,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
 
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
-          throw new Error(`Error adding comment: ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
+          throw new Error(`ClickUp API ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
         }
 
         const commentData = await response.json();
@@ -365,7 +365,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
 
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
-          throw new Error(`Error editing comment: ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
+          throw new Error(`ClickUp API ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
         }
 
         return {
@@ -436,7 +436,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
 
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
-          throw new Error(`Error deleting comment: ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
+          throw new Error(`ClickUp API ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
         }
 
         return {
@@ -682,7 +682,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
 
           if (!updateResponse.ok) {
             const errorData = await updateResponse.json().catch(() => ({}));
-            throw new Error(`Error updating task: ${updateResponse.status} ${updateResponse.statusText} - ${JSON.stringify(errorData)}`);
+            throw new Error(`ClickUp API ${updateResponse.status} ${updateResponse.statusText} - ${JSON.stringify(errorData)}`);
           }
 
           updatedTask = await updateResponse.json();
@@ -823,7 +823,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
 
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
-          throw new Error(`Error creating task: ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
+          throw new Error(`ClickUp API ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
         }
 
         const createdTask = await response.json();
@@ -1062,6 +1062,11 @@ async function findTaskComment(taskId: string, commentId: string): Promise<Exist
 
     checked += page.length;
     sawThreadedReplies ||= page.some((entry) => (entry.reply_count ?? 0) > 0);
+
+    // A short page is the last one - requesting the next would only return [].
+    if (page.length < COMMENTS_PER_PAGE) {
+      break;
+    }
 
     // Comments come back newest first, so once a page runs past the edit window
     // there is nothing editable further back.

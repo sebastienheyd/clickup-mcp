@@ -238,8 +238,9 @@ test("editComment reports an unknown comment id and hints at threaded replies", 
   process.env.CLICKUP_TEAM_ID = "team1";
 
   const { registerTaskToolsWrite } = await import("../tools/task-write-tools");
-  // Second page comes back empty, which ends the search
-  const { mockAgent } = setupClient([ownComment({ id: "other", reply_count: 3 })], []);
+  // A single short page: the search must stop there - a request for a second
+  // page is not intercepted and would fail the call instead of reporting "not found"
+  const { mockAgent } = setupClient([ownComment({ id: "other", reply_count: 3 })]);
 
   const tools: Record<string, any> = {};
   registerTaskToolsWrite(makeServerStub(tools), { user: { username: "me", id: 42 } });
