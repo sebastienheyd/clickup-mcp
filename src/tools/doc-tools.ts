@@ -2,6 +2,60 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { CONFIG } from "../shared/config";
 import { generateDocumentUrl } from "../shared/utils";
+import { applyEdits, compareLines, DocEdit, findRawHtml } from "../shared/doc-edits";
+
+const PAGE_NOT_CHANGED = "The page was NOT changed.";
+const MAX_SAMPLE_LINES = 5;
+
+function pageApiUrl(doc_id: string, page_id: string): string {
+  return `https://api.clickup.com/api/v3/workspaces/${CONFIG.teamId}/docs/${doc_id}/pages/${page_id}`;
+}
+
+/** Always a fresh read: editDocumentPage never works from a cached copy. */
+async function fetchPage(doc_id: string, page_id: string): Promise<any> {
+  const response = await fetch(pageApiUrl(doc_id, page_id), {
+    headers: { Authorization: CONFIG.apiKey },
+  });
+  if (!response.ok) {
+    throw new Error(`Error fetching page: ${response.status} ${response.statusText}. ${await response.text()}`);
+  }
+  return response.json();
+}
+
+function sampleLines(lines: string[]): string {
+  const shown = lines.slice(0, MAX_SAMPLE_LINES).map(line => `    ${JSON.stringify(line)}`);
+  if (lines.length > MAX_SAMPLE_LINES) {
+    shown.push(`    ... and ${lines.length - MAX_SAMPLE_LINES} more`);
+  }
+  return shown.join("\n");
+}
+
+/** Differences between what was written and what ClickUp stored, as warnings. */
+function verificationWarnings(expected: string, actual: string, edits: DocEdit[]): string[] {
+  const warnings: string[] = [];
+
+  edits.forEach((edit, index) => {
+    if (edit.new_str && !actual.includes(edit.new_str)) {
+      warnings.push(`edit ${index + 1}: new_str not found verbatim after the write - ClickUp's Markdown import rewrote it (e.g. *italic* is stored as _italic_). Check the page.`);
+    }
+  });
+
+  const { missing, unexpected } = compareLines(expected, actual);
+  if (missing.length > 0 || unexpected.length > 0) {
+    const parts = [
+      "ClickUp's Markdown import changed the page beyond the requested edits. This typically happens on the first API write of a page edited in the UI (layout normalised, blank lines dropped, indented blocks turned into list items); later edits of the same page are stable. Check the page.",
+    ];
+    if (missing.length > 0) {
+      parts.push(`  ${missing.length} line(s) expected but missing:\n${sampleLines(missing)}`);
+    }
+    if (unexpected.length > 0) {
+      parts.push(`  ${unexpected.length} line(s) not expected:\n${sampleLines(unexpected)}`);
+    }
+    warnings.push(parts.join("\n"));
+  }
+
+  return warnings;
+}
 
 /**
  * Helper function to recursively extract all pages from nested page structure
@@ -165,6 +219,9 @@ export function registerDocumentToolsRead(server: McpServer) {
         result.push(`Current page_id: ${targetPage.id}`);
         result.push(`Current Page Title: ${pageContent.name}`);
         result.push(`Current Page URL: ${generateDocumentUrl(doc_id, targetPage.id)}`);
+        if (pageContent.date_updated) {
+          result.push(`Current Page date_updated: ${pageContent.date_updated} (pass it as expected_date_updated to editDocumentPage)`);
+        }
 
         // Page structure overview with hierarchy
         result.push('Page Structure:');
@@ -314,6 +371,126 @@ export function registerDocumentToolsWrite(server: McpServer) {
             {
               type: "text",
               text: `Error updating page: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  tool(
+    "editDocumentPage",
+    [
+      "Replaces portions of an existing document page instead of rewriting the whole page - use it to tick a checkbox, fix a line or add a note next to an item.",
+      "Prefer it over updateDocumentPage for any change smaller than the page: the page is read right before the write, so changes made by others since your own read are kept, and you do not resend the full content.",
+      "Each edit replaces `old_str` with `new_str`. Edits are applied in order, each on the result of the previous ones. Every `old_str` must occur exactly once in the page's current Markdown, otherwise NOTHING is written and the error names the failing edit (not found / found N times).",
+      "Copy `old_str` from readDocument output: ClickUp exports its own Markdown flavour (`*   ` bullets, `_italic_`, `\\.` escapes in list items...), which may differ from what was originally written.",
+      "Pages containing raw HTML are refused: ClickUp escapes it one level deeper at each write, so every rewrite would damage them.",
+      "LIMITS: the ClickUp API has no partial or conditional write - the tool still rewrites the whole page from its fresh read, so a change made by someone else in the few hundred milliseconds between that read and the write is lost. Pass `expected_date_updated` to refuse the edit if the page changed since your own read.",
+      "After writing, the page is read back and any line ClickUp's Markdown import changed outside the requested edits is reported as a warning. The response is a short summary, not the page.",
+      "Always reference documents by their URLs when sharing with users.",
+    ].join("\n"),
+    {
+      doc_id: z
+        .string()
+        .min(1)
+        .describe("The document ID containing the page (from readDocument)"),
+      page_id: z
+        .string()
+        .min(1)
+        .describe("The page ID to edit (from readDocument)"),
+      edits: z
+        .array(z.object({
+          old_str: z.string().min(1).describe("Exact text to replace, copied from the page's current Markdown; must occur exactly once"),
+          new_str: z.string().describe("Replacement text in Markdown (empty string deletes old_str)"),
+        }))
+        .min(1)
+        .describe("Replacements applied in order, all or nothing"),
+      expected_date_updated: z
+        .union([z.number(), z.string().regex(/^\d+$/)])
+        .optional()
+        .describe("Optional: the page's date_updated (ms timestamp shown by readDocument) your edits are based on. If the page changed since, nothing is written."),
+      dry_run: z
+        .boolean()
+        .optional()
+        .describe("Optional: only check that every old_str matches exactly once, without writing (default: false)"),
+    },
+    {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+    },
+    async ({ doc_id, page_id, edits, expected_date_updated, dry_run = false }: any) => {
+      try {
+        const page = await fetchPage(doc_id, page_id);
+        const content: string = page.content || "";
+        const pageLabel = `page "${page.name}" (page_id: ${page_id})`;
+        const pageUrl = generateDocumentUrl(doc_id, page_id);
+
+        if (expected_date_updated !== undefined && String(page.date_updated) !== String(expected_date_updated)) {
+          throw new Error(`${pageLabel} changed since ${expected_date_updated} (date_updated is now ${page.date_updated}). Read it again with readDocument and redo the edits. ${PAGE_NOT_CHANGED}`);
+        }
+
+        const html = findRawHtml(content);
+        if (html) {
+          const sample = html.length > 80 ? `${html.slice(0, 80)}...` : html;
+          throw new Error(`${pageLabel} contains raw HTML (${sample}), which ClickUp escapes one level deeper at each write - editing it through the API would damage it. Remove the HTML in the ClickUp UI or edit the page there. ${PAGE_NOT_CHANGED}`);
+        }
+
+        let edited: string;
+        try {
+          edited = applyEdits(content, edits);
+        } catch (error) {
+          throw new Error(`${error instanceof Error ? error.message : String(error)}. ${PAGE_NOT_CHANGED}`);
+        }
+
+        const count = `${edits.length} edit${edits.length > 1 ? "s" : ""}`;
+
+        if (dry_run) {
+          return {
+            content: [{
+              type: "text",
+              text: `Dry run: ${count} would be applied to ${pageLabel}, every old_str matches exactly once. Nothing was written.\n\nPage URL: ${pageUrl}`,
+            }],
+          };
+        }
+
+        const response = await fetch(pageApiUrl(doc_id, page_id), {
+          method: 'PUT',
+          headers: {
+            Authorization: CONFIG.apiKey,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ content: edited, content_edit_mode: 'replace', content_format: 'text/md' }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Error updating page: ${response.status} ${response.statusText}. ${await response.text()}`);
+        }
+
+        const written = await fetchPage(doc_id, page_id);
+        const warnings = verificationWarnings(edited, written.content || "", edits);
+
+        const lines = [
+          `✅ ${count} applied to ${pageLabel}`,
+          `date_updated: ${written.date_updated}`,
+          `Page URL: ${pageUrl}`,
+        ];
+        if (warnings.length > 0) {
+          lines.push("", ...warnings.map(warning => `⚠️ Warning: ${warning}`));
+        }
+
+        return {
+          content: [{ type: "text", text: lines.join("\n") }],
+        };
+
+      } catch (error) {
+        console.error('Error editing document page:', error);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error editing page: ${error instanceof Error ? error.message : 'Unknown error'}`,
             },
           ],
         };

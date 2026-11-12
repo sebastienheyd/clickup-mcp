@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **`editDocumentPage` tool** - replaces portions of a document page (`edits: [{ old_str, new_str }]`) instead of rewriting the whole page, e.g. to tick one checkbox of a release checklist. ClickUp's API v3 only offers replace/append/prepend, so the tool does the read-modify-write itself: the page is read right before the write (never from a cached copy), each `old_str` must match exactly once (all or nothing, the error names the failing edit), and the page is read back after the write to report any line ClickUp's Markdown import changed outside the edits. The response is a short summary, not the page. Options: `expected_date_updated` refuses the edit if the page changed since the caller's read, `dry_run` only checks the matches.
+- Pages containing raw HTML are refused by `editDocumentPage`: verified live, ClickUp's Markdown import escapes it one level deeper at every write, so each rewrite damages the page further.
+- `readDocument` shows the page's `date_updated`, to be passed back as `expected_date_updated`.
+
 ## [1.10.2] - 2026-10-01
 
 ### Fixed

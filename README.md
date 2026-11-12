@@ -88,6 +88,7 @@ Turn natural language into powerful ClickUp actions:
 - *"Read the API documentation in the development space"*
 - *"Create a new requirements document for the mobile app project"*
 - *"Update the meeting notes with today's decisions"*
+- *"Tick the my-service line in the release checklist and add the deployment time"*
 - *"What documents are in the product strategy space?"*
 
 ## Key Features
@@ -223,6 +224,7 @@ The ClickUp MCP supports three operational modes to balance functionality, secur
 | `readDocument`         |      ❌       |  ✅   |   ✅   | Get document details, page structure, and content with navigation                       |
 | `searchDocuments`      |      ❌       |  ✅   |   ✅   | Search documents by name and space with fuzzy matching and space filtering              |
 | `updateDocumentPage`   |      ❌       |  ❌   |   ✅   | Update existing page content or name with replace/append modes                          |
+| `editDocumentPage`     |      ❌       |  ❌   |   ✅   | Edit parts of a page (tick a checkbox, fix a line) without resending the whole page     |
 | `createDocumentOrPage` |      ❌       |  ❌   |   ✅   | Create new documents with first page, or add pages/sub-pages to existing documents      |
 
 ### Setting the Mode

@@ -32,7 +32,7 @@ test("readDocument fetches document and page content", async (t) => {
       path: "/api/v3/workspaces/team1/docs/doc123/pages/page1",
       method: "GET",
     })
-    .reply(200, { id: "page1", name: "Page One", content: "Hello" });
+    .reply(200, { id: "page1", name: "Page One", content: "Hello", date_updated: 1794488046889 });
 
   const tools: Record<string, any> = {};
   const serverStub = {
@@ -53,6 +53,7 @@ test("readDocument fetches document and page content", async (t) => {
   const text = result.content.map((b: any) => b.text || "").join("\n");
   assert.ok(text.includes("doc_id: doc123"));
   assert.ok(text.includes("Page Content"));
+  assert.ok(text.includes("Current Page date_updated: 1794488046889"));
 
   await mockAgent.close();
   t.mock.timers.reset();
