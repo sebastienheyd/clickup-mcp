@@ -107,6 +107,10 @@
       "description": "Replace portions of an existing document page (old_str/new_str edits, each matching exactly once) instead of rewriting the whole page. The page is read right before the write and checked after it; pages containing raw HTML are refused."
     },
     {
+      "name": "deleteDocument",
+      "description": "Delete a whole document with all its pages. Only documents created by the API token's own user can be deleted; the response echoes the name, location and page tree."
+    },
+    {
       "name": "createDocumentOrPage",
       "description": "Create a new document with its first page (using space_id or list_id), add a page to an existing document (using doc_id), or create a sub-page (using doc_id and parent_page_id). Supports markdown content."
     }

@@ -225,6 +225,7 @@ The ClickUp MCP supports three operational modes to balance functionality, secur
 | `searchDocuments`      |      ❌       |  ✅   |   ✅   | Search documents by name and space with fuzzy matching and space filtering              |
 | `updateDocumentPage`   |      ❌       |  ❌   |   ✅   | Update existing page content or name with replace/append modes                          |
 | `editDocumentPage`     |      ❌       |  ❌   |   ✅   | Edit parts of a page (tick a checkbox, fix a line) without resending the whole page     |
+| `deleteDocument`       |      ❌       |  ❌   |   ✅   | Delete your own documents with all their pages (page tree echoed back)                  |
 | `createDocumentOrPage` |      ❌       |  ❌   |   ✅   | Create new documents with first page, or add pages/sub-pages to existing documents      |
 
 ### Setting the Mode

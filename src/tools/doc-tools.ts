@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { CONFIG } from "../shared/config";
-import { generateDocumentUrl } from "../shared/utils";
+import { generateDocumentUrl, getCurrentUser } from "../shared/utils";
 import { applyEdits, compareLines, DocEdit, findRawHtml } from "../shared/doc-edits";
 
 const PAGE_NOT_CHANGED = "The page was NOT changed.";
@@ -20,6 +20,17 @@ async function fetchPage(doc_id: string, page_id: string): Promise<any> {
     throw new Error(`Error fetching page: ${response.status} ${response.statusText}. ${await response.text()}`);
   }
   return response.json();
+}
+
+// Parent types of docs and views (v2 view `parent.type`, v3 doc `parent.type`)
+const PARENT_TYPES: Record<string, string> = { "4": "space", "5": "folder", "6": "list", "7": "everything", "12": "workspace" };
+
+/** Page tree as indented "name (page_id: id)" lines, for echoing a deleted doc. */
+function pageTreeLines(pageGroups: any[], depth: number = 0): string[] {
+  return pageGroups.flatMap((page: any) => [
+    `${'  '.repeat(depth)}- ${page.name} (page_id: ${page.id})`,
+    ...pageTreeLines(page.pages || [], depth + 1),
+  ]);
 }
 
 function sampleLines(lines: string[]): string {
@@ -491,6 +502,90 @@ export function registerDocumentToolsWrite(server: McpServer) {
             {
               type: "text",
               text: `Error editing page: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  tool(
+    "deleteDocument",
+    [
+      "Deletes a whole ClickUp document with all its pages. Check it with readDocument first.",
+      "GUARDRAILS: only documents created by the API token's own user can be deleted. Other people's documents must be deleted in the ClickUp UI.",
+      "ClickUp only flags the document as deleted (it should be restorable from the Trash in the UI). The response echoes its name, location and page tree.",
+      "There is no way to delete a single page through the API.",
+    ].join("\n"),
+    {
+      doc_id: z
+        .string()
+        .min(1)
+        .describe("The document ID to delete (from readDocument or the document URL)"),
+    },
+    {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+    },
+    async ({ doc_id }: any) => {
+      try {
+        // The v3 API has no doc deletion, but a doc is also a view of type "doc"
+        // with the same id, and deleting that view deletes the doc. Checking the
+        // type first prevents deleting a list/board view given by mistake.
+        const viewResponse = await fetch(`https://api.clickup.com/api/v2/view/${doc_id}`, {
+          headers: { Authorization: CONFIG.apiKey },
+        });
+        if (!viewResponse.ok) {
+          throw new Error(`document ${doc_id} not found (${viewResponse.status} ${viewResponse.statusText}). ${await viewResponse.text()}`);
+        }
+        const { view } = await viewResponse.json();
+
+        if (!view || view.type !== "doc") {
+          throw new Error(`${doc_id} is not a document but a view of type "${view?.type}" ("${view?.name}"). Nothing was deleted.`);
+        }
+
+        const userData = await getCurrentUser();
+        if (String(view.creator) !== String(userData.user.id)) {
+          throw new Error(`"${view.name}" (doc_id: ${doc_id}) was created by user ${view.creator}: only documents you created can be deleted. Nothing was deleted.`);
+        }
+
+        const pagesResponse = await fetch(`https://api.clickup.com/api/v3/workspaces/${CONFIG.teamId}/docs/${doc_id}/pageListing`, {
+          headers: { Authorization: CONFIG.apiKey },
+        });
+        if (!pagesResponse.ok) {
+          throw new Error(`Error fetching pages: ${pagesResponse.status} ${pagesResponse.statusText}. Nothing was deleted.`);
+        }
+        const pageGroups = await pagesResponse.json();
+
+        const response = await fetch(`https://api.clickup.com/api/v2/view/${doc_id}`, {
+          method: 'DELETE',
+          headers: { Authorization: CONFIG.apiKey },
+        });
+        if (!response.ok) {
+          throw new Error(`${response.status} ${response.statusText}. ${await response.text()}`);
+        }
+
+        const pageLines = pageTreeLines(Array.isArray(pageGroups) ? pageGroups : []);
+        return {
+          content: [{
+            type: "text",
+            text: [
+              `🗑️ Deleted document "${view.name}" (doc_id: ${doc_id}) - ClickUp only flags it as deleted, it should be restorable from the Trash in the UI.`,
+              `Location: ${view.parent ? `${PARENT_TYPES[String(view.parent.type)] || `type ${view.parent.type}`} ${view.parent.id}` : 'unknown'}`,
+              `Pages (${pageLines.length}):`,
+              ...(pageLines.length > 0 ? pageLines : ['  (none)']),
+            ].join('\n'),
+          }],
+        };
+
+      } catch (error) {
+        console.error('Error deleting document:', error);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error deleting document: ${error instanceof Error ? error.message : 'Unknown error'}`,
             },
           ],
         };
