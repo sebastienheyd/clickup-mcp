@@ -197,3 +197,38 @@ test("editDocumentPage reports a failed write", async (t) => {
 
   assert.match(text(result), /500/);
 });
+
+test("editDocumentPage reports a successful write whose verification read failed", async (t) => {
+  const { client, tools } = await setup(t);
+  replyPage(client, ORIGINAL);
+  capturePut(client);
+  client.intercept({ path: PAGE_PATH, method: "GET" }).reply(429, "rate limited");
+
+  const result = await tools.editDocumentPage({ doc_id: "doc123", page_id: "page1", edits: [TICK_EDIT] });
+
+  const output = text(result);
+  assert.match(output, /1 edit applied/);
+  assert.match(output, /could not be verified/);
+  assert.match(output, /429/);
+  assert.match(output, /do NOT repeat the edits/);
+  assert.doesNotMatch(output, /^Error/);
+});
+
+test("editDocumentPage does not warn about a new_str rewritten by a later edit", async (t) => {
+  const { client, tools } = await setup(t);
+  replyPage(client, "status: todo");
+  const put = capturePut(client);
+  replyPage(client, "state: finished", 2000);
+
+  const result = await tools.editDocumentPage({
+    doc_id: "doc123",
+    page_id: "page1",
+    edits: [
+      { old_str: "todo", new_str: "done" },
+      { old_str: "status: done", new_str: "state: finished" },
+    ],
+  });
+
+  assert.equal(put.body.content, "state: finished");
+  assert.doesNotMatch(text(result), /Warning/);
+});

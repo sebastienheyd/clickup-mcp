@@ -135,3 +135,43 @@ test("deleteDocument reports a failed deletion", async (t) => {
 
   assert.match(text(result), /500/);
 });
+
+test("deleteDocument reports a failed view lookup without calling it not found", async (t) => {
+  const { client, tools } = await setup(t);
+  client.intercept({ path: VIEW_PATH, method: "GET" }).reply(429, "rate limited");
+
+  const output = text(await tools.deleteDocument({ doc_id: "doc123" }));
+
+  assert.match(output, /429/);
+  assert.doesNotMatch(output, /not found/i);
+  assert.match(output, /Nothing was deleted/);
+});
+
+test("deleteDocument deletes nothing when the page listing fails", async (t) => {
+  const { client, tools } = await setup(t);
+  replyView(client);
+  client
+    .intercept({ path: "/api/v3/workspaces/team1/docs/doc123/pageListing", method: "GET" })
+    .reply(500, "boom");
+  const deletion = captureDelete(client);
+
+  const output = text(await tools.deleteDocument({ doc_id: "doc123" }));
+
+  assert.equal(deletion.called, false);
+  assert.match(output, /Nothing was deleted/);
+});
+
+test("deleteDocument deletes nothing when the page listing has an unexpected format", async (t) => {
+  const { client, tools } = await setup(t);
+  replyView(client);
+  client
+    .intercept({ path: "/api/v3/workspaces/team1/docs/doc123/pageListing", method: "GET" })
+    .reply(200, { pages: [] });
+  const deletion = captureDelete(client);
+
+  const output = text(await tools.deleteDocument({ doc_id: "doc123" }));
+
+  assert.equal(deletion.called, false);
+  assert.match(output, /unexpected/);
+  assert.match(output, /Nothing was deleted/);
+});

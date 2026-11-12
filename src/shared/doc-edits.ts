@@ -9,6 +9,15 @@ export interface DocEdit {
   new_str: string;
 }
 
+/** Counts overlapping occurrences too: "aa" occurs twice in "aaa", so it is ambiguous. */
+function countOccurrences(text: string, search: string): number {
+  let count = 0;
+  for (let index = text.indexOf(search); index !== -1; index = text.indexOf(search, index + 1)) {
+    count++;
+  }
+  return count;
+}
+
 /**
  * Applies the edits in order, each one on the result of the previous ones.
  * Every old_str must occur exactly once at the time it is applied, otherwise
@@ -20,7 +29,7 @@ export function applyEdits(content: string, edits: DocEdit[]): string {
     if (!edit.old_str) {
       throw new Error(`${label}: old_str is empty`);
     }
-    const count = current.split(edit.old_str).length - 1;
+    const count = countOccurrences(current, edit.old_str);
     if (count === 0) {
       throw new Error(`${label}: old_str not found`);
     }

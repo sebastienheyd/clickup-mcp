@@ -54,3 +54,7 @@ test("compareLines lists lines that differ, ignoring their order", () => {
 test("compareLines reports nothing for identical content", () => {
   assert.deepEqual(compareLines("a\nb", "a\nb"), { missing: [], unexpected: [] });
 });
+
+test("applyEdits counts overlapping occurrences as ambiguous", () => {
+  assert.throws(() => applyEdits("aaa", [{ old_str: "aa", new_str: "b" }]), /edit 1: old_str found 2 times/);
+});

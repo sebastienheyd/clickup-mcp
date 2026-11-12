@@ -46,7 +46,8 @@ function verificationWarnings(expected: string, actual: string, edits: DocEdit[]
   const warnings: string[] = [];
 
   edits.forEach((edit, index) => {
-    if (edit.new_str && !actual.includes(edit.new_str)) {
+    // A new_str rewritten by a later edit is absent from `expected` too: not ClickUp's doing
+    if (edit.new_str && expected.includes(edit.new_str) && !actual.includes(edit.new_str)) {
       warnings.push(`edit ${index + 1}: new_str not found verbatim after the write - ClickUp's Markdown import rewrote it (e.g. *italic* is stored as _italic_). Check the page.`);
     }
   });
@@ -479,7 +480,24 @@ export function registerDocumentToolsWrite(server: McpServer) {
           throw new Error(`Error updating page: ${response.status} ${response.statusText}. ${await response.text()}`);
         }
 
-        const written = await fetchPage(doc_id, page_id);
+        // The write succeeded: a failing verification read must not be reported as a
+        // failed edit, or the caller would retry edits that are already applied.
+        let written: any;
+        try {
+          written = await fetchPage(doc_id, page_id);
+        } catch (error) {
+          return {
+            content: [{
+              type: "text",
+              text: [
+                `✅ ${count} applied to ${pageLabel}`,
+                `Page URL: ${pageUrl}`,
+                "",
+                `⚠️ Warning: the write succeeded but could not be verified (${error instanceof Error ? error.message : String(error)}) - do NOT repeat the edits. Check the page with readDocument later.`,
+              ].join("\n"),
+            }],
+          };
+        }
         const warnings = verificationWarnings(edited, written.content || "", edits);
 
         const lines = [
@@ -537,7 +555,9 @@ export function registerDocumentToolsWrite(server: McpServer) {
           headers: { Authorization: CONFIG.apiKey },
         });
         if (!viewResponse.ok) {
-          throw new Error(`document ${doc_id} not found (${viewResponse.status} ${viewResponse.statusText}). ${await viewResponse.text()}`);
+          // Verified live: an unknown or deleted doc answers 404 "View not found" (OAUTH_058)
+          const reason = viewResponse.status === 404 ? `document ${doc_id} not found` : `could not read document ${doc_id}`;
+          throw new Error(`${reason} (${viewResponse.status} ${viewResponse.statusText}). ${await viewResponse.text()} Nothing was deleted.`);
         }
         const { view } = await viewResponse.json();
 
@@ -557,6 +577,10 @@ export function registerDocumentToolsWrite(server: McpServer) {
           throw new Error(`Error fetching pages: ${pagesResponse.status} ${pagesResponse.statusText}. Nothing was deleted.`);
         }
         const pageGroups = await pagesResponse.json();
+        // The page tree is the only record of what gets deleted: never echo a wrong one
+        if (!Array.isArray(pageGroups)) {
+          throw new Error(`unexpected page listing format (${JSON.stringify(pageGroups).slice(0, 200)}). Nothing was deleted.`);
+        }
 
         const response = await fetch(`https://api.clickup.com/api/v2/view/${doc_id}`, {
           method: 'DELETE',
@@ -566,7 +590,7 @@ export function registerDocumentToolsWrite(server: McpServer) {
           throw new Error(`${response.status} ${response.statusText}. ${await response.text()}`);
         }
 
-        const pageLines = pageTreeLines(Array.isArray(pageGroups) ? pageGroups : []);
+        const pageLines = pageTreeLines(pageGroups);
         return {
           content: [{
             type: "text",
