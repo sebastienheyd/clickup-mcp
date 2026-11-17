@@ -10,12 +10,6 @@
     "email": "marco@hauptsache.net",
     "url": "https://github.com/Nemo64"
   },
-  "contributors": [
-    {
-      "name": "Sébastien HEYD",
-      "url": "https://github.com/sebastienheyd"
-    }
-  ],
   "homepage": "https://github.com/sebastienheyd/clickup-mcp",
   "documentation": "https://github.com/sebastienheyd/clickup-mcp/blob/main/README.md",
   "support": "https://github.com/sebastienheyd/clickup-mcp/issues",

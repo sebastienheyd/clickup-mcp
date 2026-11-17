@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - The workspace member list is now cached with full member data (id, name, e-mail) and a failed fetch is no longer cached for a minute.
 
+### Fixed
+- `manifest.json` no longer has the `contributors` key: the MCPB validator (mcpb 1.2.0) rejects it (`Unrecognized key(s) in object: 'contributors'`), which made `mcpb pack` - and so the Release workflow - fail. The contributor is listed in `package.json` instead.
+
 ## [1.11.0] - 2026-11-12
 
 ### Added

@@ -38,6 +38,9 @@
     "automation"
   ],
   "author": "Sébastien HEYD (https://github.com/sebastienheyd)",
+  "contributors": [
+    "Sébastien HEYD (https://github.com/sebastienheyd)"
+  ],
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
