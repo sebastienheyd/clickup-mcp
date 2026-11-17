@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- The Release workflow publishes to npm by Trusted Publishing (OIDC, no stored token) with provenance, after the tests and the `.mcpb` build. It checks first that the tag equals `v` + the `package.json` version and refuses to release otherwise. The publish step is replayable: a version already on npm is skipped.
+- First version published on npm: `1.12.0` was released on GitHub only (its tag was pushed before the workflow could publish), so `1.12.1` carries the same code.
+
+### Changed
+- The Release workflow runs on Node 24 (npm 11.5.1 or later is required by Trusted Publishing) instead of Node 20.
+
 ## [1.12.0] - 2026-11-17
 
 ### Added
