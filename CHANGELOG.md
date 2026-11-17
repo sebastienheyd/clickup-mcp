@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Person mentions in comments.** `addComment` and `editComment` turn `[@Name](#user_mention#<user_id>)` (the syntax of the claude.ai ClickUp connector) into a mention fragment that notifies the person. The fragment is the `tag` form the ClickUp UI itself writes (`{"type":"tag","user":{"id":...},"text":"@Name"}`); a plain `@Name` stays text and notifies nobody.
+- Reading renders every stored mention form as `[@Name](#user_mention#<user_id>)`, so a comment read with `getTaskById` and passed back to `editComment` keeps its mentions: `tag` (UI), `user_mention` with `user.id` (connector, new comment) and `user_mention` with `user_mention.id` (connector, edited comment - no name stored, so the name comes from the cached workspace member list, falling back to `@<id>`). A `tag` without a user (a `#tag`) is still plain text.
+- **`findMemberByName` tool** - finds a workspace member by display name, username or e-mail (case and accent insensitive, partial words accepted) and returns the `user_id` with a ready-to-use mention. An exact match wins; several matches are all listed and none is picked. It reuses the cached `GET /team` call, so it costs no extra API call within the minute.
+
+### Changed
+- The workspace member list is now cached with full member data (id, name, e-mail) and a failed fetch is no longer cached for a minute.
+
 ## [1.11.0] - 2026-11-12
 
 ### Added

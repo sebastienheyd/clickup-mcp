@@ -44,11 +44,11 @@
     },
     {
       "name": "addComment",
-      "description": "Add a comment to a specific task with linking best practices and progress updates. Images written as markdown (local file paths, data URIs or URLs) are uploaded and embedded automatically."
+      "description": "Add a comment to a specific task with linking best practices and progress updates. Images written as markdown (local file paths, data URIs or URLs) are uploaded and embedded automatically. People are mentioned (and notified) with [@Name](#user_mention#<user_id>)."
     },
     {
       "name": "editComment",
-      "description": "Replace the text of an own task comment within a configurable time window (default 24 hours) instead of posting a follow-up comment. Formatting and the comment's own images are preserved (ClickUp refuses new images on edit); comments by other users and older comments are refused."
+      "description": "Replace the text of an own task comment within a configurable time window (default 24 hours) instead of posting a follow-up comment. Formatting and the comment's own images are preserved (ClickUp refuses new images on edit); comments by other users and older comments are refused. Person mentions are kept and can be added with [@Name](#user_mention#<user_id>)."
     },
     {
       "name": "deleteComment",
@@ -65,6 +65,10 @@
     {
       "name": "searchTasks",
       "description": "Search tasks by name, content, assignees, and ID with fuzzy matching and support for multiple search terms (OR logic). Can filter by list_ids, space_ids, todo status, or tasks assigned to current user. Supports include_closed and archived flags to include closed or archived tasks (both default to false)."
+    },
+    {
+      "name": "findMemberByName",
+      "description": "Find a workspace member by display name, username or e-mail (case and accent insensitive) to get the user_id needed to mention them in a comment. Several matches are all listed, never picked at random."
     },
     {
       "name": "searchSpaces",

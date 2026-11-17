@@ -1,10 +1,12 @@
 import {McpServer} from "@modelcontextprotocol/sdk/server/mcp.js";
 import {z} from "zod";
 import {CONFIG} from "../shared/config";
-import {isTaskId, isCustomTaskId, getTaskSearchIndex, performMultiTermSearch} from "../shared/utils";
+import {isTaskId, isCustomTaskId, getTaskSearchIndex, performMultiTermSearch, getTeamMembers, findTeamMembers} from "../shared/utils";
+import {toUserMentionMarkdown} from "../clickup-text";
 import {generateTaskMetadata} from "./task-tools";
 
 const MAX_SEARCH_RESULTS = 50;
+const MAX_MEMBER_RESULTS = 20;
 
 export function registerSearchTools(server: McpServer, userData: any) {
   // Workaround: SDK 1.27+ dual Zod v3/v4 type causes TS2589 on server.tool() generics
@@ -224,6 +226,51 @@ export function registerSearchTools(server: McpServer, userData: any) {
       return {
         content: await Promise.all(resultTasks.map((task: any) => generateTaskMetadata(task))),
       };
+    }
+  );
+
+  tool(
+    "findMemberByName",
+    [
+      "Finds a workspace member by display name, username or e-mail (case and accent insensitive, partial words accepted) and returns their user_id.",
+      "Use it to get the user_id needed to mention a person in a comment: the result gives the ready-to-use mention `[@Name](#user_mention#<user_id>)` for addComment and editComment.",
+      "When several members match, all of them are listed and none is chosen - ask which one is meant or search more precisely (full name, e-mail).",
+    ].join("\n"),
+    {
+      query: z
+        .string()
+        .min(1)
+        .describe("Name, username or e-mail (or a part of it) of the person to find, e.g. \"Amar\", \"amar ouali\" or \"amar@example.com\""),
+    },
+    {
+      readOnlyHint: true,
+    },
+    async ({ query }: any) => {
+      try {
+        const members = await getTeamMembers();
+        const matches = findTeamMembers(query, members);
+
+        if (matches.length === 0) {
+          return {
+            content: [{ type: "text" as const, text: `No workspace member matches "${query}" (${members.length} members searched).` }],
+          };
+        }
+
+        const lines = matches.slice(0, MAX_MEMBER_RESULTS).map(
+          (m) => `- ${m.username} (user_id: ${m.id}, email: ${m.email || "unknown"}) -> ${toUserMentionMarkdown(m.id, m.username)}`
+        );
+        const header = matches.length === 1
+          ? `1 member matches "${query}":`
+          : `${matches.length} members match "${query}" - this is ambiguous, do not pick one without asking${matches.length > MAX_MEMBER_RESULTS ? ` (first ${MAX_MEMBER_RESULTS} shown)` : ""}:`;
+
+        return {
+          content: [{ type: "text" as const, text: [header, ...lines].join("\n") }],
+        };
+      } catch (error) {
+        return {
+          content: [{ type: "text" as const, text: `Error finding member: ${error instanceof Error ? error.message : String(error)}` }],
+        };
+      }
     }
   );
 }

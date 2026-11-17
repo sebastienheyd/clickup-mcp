@@ -38,6 +38,11 @@ const COMMENT_FORMATTING_HINT = [
   "TABLES ARE NOT SUPPORTED by ClickUp comments - a markdown table is automatically converted to a monospace code block, which is readable but plain. Prefer bold labels or lists over tables when writing comments.",
 ].join("\n");
 
+const MENTION_HINT = [
+  "MENTIONS: To mention (and notify) a person, write `[@Name](#user_mention#<user_id>)`, e.g. `[@Amar OUALI](#user_mention#4528224)`. The numeric user_id is required - a plain `@Name` is only text and notifies nobody.",
+  "Get the user_id with findMemberByName (by name or e-mail; it returns the ready-to-use mention), or from the `user_id` of a comment author, the creator or the assignees shown by getTaskById. Mentions in existing comments are read back in this same syntax, so passing the text back keeps them.",
+].join("\n");
+
 const IMAGE_SUPPORT_HINT = [
   "IMAGES: Reference images with normal markdown - `![caption](/absolute/path/to/screenshot.png)`.",
   "This server runs locally, so a local file path is read and uploaded automatically - never inline a screenshot as base64 when a path exists, it costs orders of magnitude more tokens.",
@@ -171,6 +176,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
         "- Link to relevant lists, spaces, or other ClickUp entities when applicable",
         "PROGRESS UPDATES: Include current status, progress information, and next steps.",
         COMMENT_FORMATTING_HINT,
+        MENTION_HINT,
         IMAGE_SUPPORT_HINT,
         "IMAGE LAYOUT: An image inside a numbered list breaks ClickUp's numbering. Write walkthrough steps as bold lines with a blank line before and after the image instead (`**1. Open the login page**`).",
         "If external links are provided, verify they are publicly accessible and incorporate relevant information.",
@@ -309,6 +315,7 @@ export function registerTaskToolsWrite(server: McpServer, userData: any) {
         "ClickUp shows no 'edited' marker, so people who already read the comment will not notice the change - for anything that changes meaning after a discussion has started, prefer a follow-up comment.",
         "Editing does not reset the creation date, so the edit window does not get extended by editing.",
         COMMENT_FORMATTING_HINT,
+        MENTION_HINT,
         "IMAGES ON EDIT: an edit can only KEEP the images already in this comment. Reading the comment (getTaskById) returns them as markdown, and passing that markdown back keeps them; an image whose markdown you drop disappears.",
         "ClickUp refuses to add any other image to an existing comment - a new file, a data URI, a web URL, or an image of another comment or of the task description - so such a reference is rejected before anything is uploaded. To share a new image, post a new comment with addComment.",
         "Task URLs (https://app.clickup.com/t/TASK_ID) become live task references, and existing references are read back as such URLs - passing the text back keeps them.",

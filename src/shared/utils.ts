@@ -623,59 +623,122 @@ export async function getSpaceContent(spaceId: string): Promise<{ lists: any[], 
   return fetchPromise;
 }
 
-// Cache for team members to avoid repeated API calls and race conditions
-let cachedTeamMembersPromise: Promise<string[]> | null = null;
+/**
+ * A member of the workspace, as needed to mention or look them up.
+ */
+export interface TeamMember {
+  id: number;
+  username: string;
+  email: string;
+}
+
+// Cache for team members to avoid repeated API calls and race conditions.
+// The promise is cached, not the result, and dropped again on failure so that a
+// transient error is retried instead of being served for a whole minute.
+let cachedTeamMembersPromise: Promise<TeamMember[]> | null = null;
 
 /**
- * Gets all team members from ClickUp API with caching
+ * Gets all members of the configured workspace (id, display name, e-mail) with caching.
+ * Throws when the API call fails - callers decide how to degrade.
  */
-export async function getAllTeamMembers(): Promise<string[]> {
-  // Return cached promise if available
+export async function getTeamMembers(): Promise<TeamMember[]> {
   if (cachedTeamMembersPromise) {
     return cachedTeamMembersPromise;
   }
 
-  // Create the fetch promise
-  const fetchPromise = (async (): Promise<string[]> => {
-    try {
-      const response = await fetch(`https://api.clickup.com/api/v2/team`, {
-        headers: { Authorization: CONFIG.apiKey },
-      });
+  const fetchPromise = (async (): Promise<TeamMember[]> => {
+    const response = await fetch(`https://api.clickup.com/api/v2/team`, {
+      headers: { Authorization: CONFIG.apiKey },
+    });
 
-      if (!response.ok) {
-        console.error(`Error fetching teams: ${response.status} ${response.statusText}`);
-        return [];
-      }
+    if (!response.ok) {
+      throw new Error(`Error fetching teams: ${response.status} ${response.statusText}`);
+    }
 
-      const data = await response.json();
-      if (!data.teams || !Array.isArray(data.teams)) {
-        return [];
-      }
-
-      // Find the team that matches our configured team ID and extract all user IDs
-      const currentTeam = data.teams.find((team: any) => team.id === CONFIG.teamId);
-      if (!currentTeam || !currentTeam.members || !Array.isArray(currentTeam.members)) {
-        console.error(`Team ${CONFIG.teamId} not found or has no members`);
-        return [];
-      }
-
-      return currentTeam.members.map((member: any) => member.user?.id).filter(Boolean);
-    } catch (error) {
-      console.error('Error fetching team members:', error);
+    const data = await response.json();
+    if (!data.teams || !Array.isArray(data.teams)) {
       return [];
     }
+
+    // Find the team that matches our configured team ID and extract its members
+    const currentTeam = data.teams.find((team: any) => team.id === CONFIG.teamId);
+    if (!currentTeam || !currentTeam.members || !Array.isArray(currentTeam.members)) {
+      console.error(`Team ${CONFIG.teamId} not found or has no members`);
+      return [];
+    }
+
+    return currentTeam.members
+      .filter((member: any) => member.user?.id)
+      .map((member: any): TeamMember => ({
+        id: member.user.id,
+        username: member.user.username ?? "",
+        email: member.user.email ?? "",
+      }));
   })();
 
-  // Cache the promise
   cachedTeamMembersPromise = fetchPromise;
-  
+  fetchPromise.catch(() => {
+    if (cachedTeamMembersPromise === fetchPromise) {
+      cachedTeamMembersPromise = null;
+    }
+  });
+
   // Auto-cleanup after 60 seconds
   setTimeout(() => {
-    cachedTeamMembersPromise = null;
-    console.error(`Auto-cleaned team members cache`);
+    if (cachedTeamMembersPromise === fetchPromise) {
+      cachedTeamMembersPromise = null;
+      console.error(`Auto-cleaned team members cache`);
+    }
   }, GLOBAL_REFRESH_INTERVAL);
-  
+
   return fetchPromise;
+}
+
+/**
+ * Gets all team member ids from ClickUp API with caching (empty list on failure)
+ */
+export async function getAllTeamMembers(): Promise<number[]> {
+  try {
+    return (await getTeamMembers()).map((member) => member.id);
+  } catch (error) {
+    console.error('Error fetching team members:', error);
+    return [];
+  }
+}
+
+/**
+ * Lowercase and strip accents, so that "sebastien" finds "Sébastien".
+ */
+function normalizeForMatch(text: string): string {
+  return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+}
+
+/**
+ * Find workspace members by display name, username or e-mail, case and accent insensitive.
+ *
+ * Matching is tiered so that an unambiguous query is never drowned by looser matches:
+ * members whose name or e-mail equals the query win; otherwise every member whose name or
+ * e-mail contains all the words of the query. More than one result means the query is
+ * ambiguous - the caller must list them, never pick one.
+ */
+export function findTeamMembers(query: string, members: TeamMember[]): TeamMember[] {
+  const needle = normalizeForMatch(query.replace(/^@/, ""));
+  if (!needle) {
+    return [];
+  }
+
+  const exact = members.filter(
+    (m) => normalizeForMatch(m.username) === needle || normalizeForMatch(m.email) === needle
+  );
+  if (exact.length > 0) {
+    return exact;
+  }
+
+  const words = needle.split(/\s+/);
+  return members.filter((m) => {
+    const haystack = `${normalizeForMatch(m.username)} ${normalizeForMatch(m.email)}`;
+    return words.every((word) => haystack.includes(word));
+  });
 }
 
 /**

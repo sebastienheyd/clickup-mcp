@@ -8,6 +8,16 @@ import remarkGfm from 'remark-gfm';
 import type { Root, PhrasingContent, Link, Text, Content, Heading, Paragraph, Blockquote, List, ListItem, Code, Table, TableRow, TableCell } from 'mdast';
 
 /**
+ * The person a mention fragment points at. Only `id` is needed to notify them;
+ * the UI also stores username, email, colour and so on.
+ */
+export interface ClickUpMentionedUser {
+  id: number | string;
+  username?: string;
+  [key: string]: any;
+}
+
+/**
  * Represents a ClickUp text item which can be plain text or an image
  */
 export interface ClickUpTextItem {
@@ -15,6 +25,20 @@ export interface ClickUpTextItem {
   type?: string;
   task_mention?: {
     task_id?: string;
+  };
+  /**
+   * Present on person mention fragments: `tag` when written from the ClickUp UI,
+   * `user_mention` when written by the claude.ai ClickUp connector.
+   */
+  user?: ClickUpMentionedUser;
+  /**
+   * Third stored form of a person mention: a comment edited (PUT) by the claude.ai
+   * ClickUp connector carries the id here, as a string, with no `user` and no `text`.
+   */
+  user_mention?: {
+    id?: number | string;
+    notify?: boolean;
+    tag_id?: string;
   };
   image?: {
     id?: string;
@@ -190,6 +214,18 @@ export async function convertClickUpTextItemsToToolCallResult(
         });
       }
       // If no thumbnails, just treat as a file reference (already added to currentTextBlock)
+    }
+    // Person mentions render as [@Name](#user_mention#<id>) so the user id survives the
+    // round trip: writing that syntax back through addComment/editComment regenerates
+    // the mention. A tag without a user (a plain #tag) stays an ordinary text item.
+    else if ((item.type === "tag" || item.type === "user_mention") && isUsableUserId(mentionedUserId(item))) {
+      const userId = mentionedUserId(item)!;
+      let name = item.text ?? item.user?.username;
+      if (!name) {
+        // The connector's form stores neither text nor user: ask the member list
+        name = await lookupMemberName(userId);
+      }
+      currentLine += toUserMentionMarkdown(userId, name ?? "");
     }
     // Handle text items
     else if (typeof item.text === "string") {
@@ -562,6 +598,13 @@ export interface ClickUpCommentBlock {
     task_id: string;
   };
   /**
+   * Present on person mention fragments (`type: "tag"`). ClickUp notifies the user
+   * with this id; `text` carries the displayed `@Name`.
+   */
+  user?: {
+    id: number;
+  };
+  /**
    * Present on image fragments. ClickUp only renders a preview when this holds the
    * complete attachment object from the upload response - a bare URL string produces
    * an empty placeholder tile.
@@ -644,6 +687,81 @@ const CLICKUP_TASK_URL_PATTERN = /^https?:\/\/app\.clickup\.com\/t\/(?:\d+\/)?([
 export function parseClickUpTaskUrl(url: string): string | null {
   const match = url.match(CLICKUP_TASK_URL_PATTERN);
   return match ? match[1] : null;
+}
+
+/**
+ * Markdown syntax for a person mention, shared with the ClickUp connector of claude.ai:
+ * [@Name](#user_mention#<user_id>)
+ */
+const USER_MENTION_URL_PATTERN = /^#user_mention#(\d+)$/;
+
+/**
+ * Extract the user id from a `#user_mention#<id>` link destination, or null if it is not one.
+ */
+export function parseUserMentionUrl(url: string): number | null {
+  const match = url.match(USER_MENTION_URL_PATTERN);
+  if (!match) {
+    return null;
+  }
+  const id = Number(match[1]);
+  return Number.isSafeInteger(id) ? id : null;
+}
+
+/**
+ * The user id of a person mention fragment, whichever of the stored forms it has:
+ * `user.id` (tag from the UI, user_mention from the connector's POST) or
+ * `user_mention.id` (comment edited by the connector).
+ */
+function mentionedUserId(item: ClickUpTextItem): number | string | undefined {
+  return item.user?.id ?? item.user_mention?.id;
+}
+
+/**
+ * Resolve a display name from the (cached) workspace member list. Never throws:
+ * reading a comment must not fail because the member lookup did - the caller falls
+ * back to the bare id.
+ */
+async function lookupMemberName(userId: number | string): Promise<string | undefined> {
+  try {
+    // Imported lazily: shared/utils reads the API configuration at load time, which
+    // pure text conversion (and its tests) must not depend on.
+    const { getTeamMembers } = await import("./shared/utils");
+    const members = await getTeamMembers();
+    return members.find((m) => String(m.id) === String(userId))?.username || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isUsableUserId(id: unknown): id is number | string {
+  return (typeof id === "number" && Number.isSafeInteger(id)) || (typeof id === "string" && /^\d+$/.test(id));
+}
+
+/**
+ * Render a person mention as markdown. The label is always `@Name` (the stored text
+ * already has the `@`), with brackets and backslashes escaped so it stays one link.
+ */
+export function toUserMentionMarkdown(userId: number | string, name: string): string {
+  const bare = name.replace(/^@/, "").trim() || String(userId);
+  const label = `@${bare}`.replace(/[\\\[\]]/g, (c) => `\\${c}`);
+  return `[${label}](#user_mention#${userId})`;
+}
+
+/**
+ * Concatenate the plain text of phrasing nodes, dropping any formatting.
+ */
+function plainTextOf(nodes: PhrasingContent[]): string {
+  return nodes
+    .map((node) => {
+      if ('value' in node && typeof node.value === 'string') {
+        return node.value;
+      }
+      if ('children' in node && Array.isArray(node.children)) {
+        return plainTextOf(node.children as PhrasingContent[]);
+      }
+      return '';
+    })
+    .join('');
 }
 
 /**
@@ -1098,6 +1216,14 @@ function walkPhrasingContent(
         const mentionedTaskId = parseClickUpTaskUrl(node.url);
         if (mentionedTaskId) {
           blocks.push({ type: 'task_mention', task_mention: { task_id: mentionedTaskId } });
+          break;
+        }
+        // A [@Name](#user_mention#<id>) link becomes a person mention, which notifies
+        // that user. The tag fragment is what the ClickUp UI itself writes.
+        const mentionedUserId = parseUserMentionUrl(node.url);
+        if (mentionedUserId !== null) {
+          const name = plainTextOf(node.children).replace(/^@/, '').trim() || String(mentionedUserId);
+          blocks.push({ type: 'tag', text: `@${name}`, user: { id: mentionedUserId } });
           break;
         }
         // Ordinary link - recurse with link attribute

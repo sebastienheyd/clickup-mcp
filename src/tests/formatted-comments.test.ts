@@ -239,3 +239,23 @@ test("convertMarkdownToClickUpBlocks separates adjacent code blocks and tables w
   assert.deepEqual(blocks[4].attributes, { "code-block": { "code-block": "plain" } });
   assert.deepEqual(blocks[7].attributes, { "code-block": { "code-block": "plain" } });
 });
+
+test("person mentions survive the full read/write round trip inside a list", async () => {
+  const { convertClickUpTextItemsToToolCallResult } = await import("../clickup-text");
+  const markdown = "Reviewers:\n\n- [@Amar OUALI](#user_mention#4528224)\n- [@Lionel NSONDE](#user_mention#32529560)";
+
+  // 1. Write: markdown -> fragments, one tag fragment per mention
+  const written = convertMarkdownToClickUpBlocks(markdown);
+  assert.equal(written.filter(b => b.type === "tag").length, 2);
+
+  // 2. Read the exact fragments back the way getTaskById renders a comment
+  const read = await convertClickUpTextItemsToToolCallResult(written as any);
+  const text = read
+    .filter((b): b is { type: "text"; text: string } => b.type === "text")
+    .map((b) => b.text)
+    .join("\n");
+  assert.equal(text, markdown);
+
+  // 3. Writing the read-back text again gives identical fragments
+  assert.deepEqual(convertMarkdownToClickUpBlocks(text), written);
+});

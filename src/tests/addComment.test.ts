@@ -295,3 +295,55 @@ test("addComment does not call an old parent invalid when the lookup stops at th
   t.mock.timers.runAll();
   t.mock.timers.reset();
 });
+
+test("addComment turns [@Name](#user_mention#id) into a person mention fragment", async (t) => {
+  t.mock.timers.enable();
+  process.env.CLICKUP_API_KEY = "test-key";
+  process.env.CLICKUP_TEAM_ID = "team1";
+
+  const { registerTaskToolsWrite } = await import("../tools/task-write-tools");
+
+  const mockAgent = new MockAgent();
+  mockAgent.disableNetConnect();
+  setGlobalDispatcher(mockAgent);
+  const client = mockAgent.get("https://api.clickup.com");
+
+  let bodyCaptured: any;
+  client
+    .intercept({ path: "/api/v2/task/task123/comment", method: "POST" })
+    .reply((opts) => {
+      bodyCaptured = JSON.parse(String(opts.body));
+      return { statusCode: 200, data: { id: "c1", user: { username: "me" }, date: "0" } };
+    });
+
+  const tools: Record<string, any> = {};
+  const descriptions: Record<string, string> = {};
+  const serverStub = {
+    tool: (name: string, desc: string, _schema: any, _opts: any, handler: any) => {
+      tools[name] = handler;
+      descriptions[name] = desc;
+    },
+  } as any;
+
+  registerTaskToolsWrite(serverStub, { user: { username: "me", id: "u1" } });
+
+  await tools.addComment({
+    task_id: "task123",
+    comment: "Hello [@Amar OUALI](#user_mention#4528224), please check.",
+  });
+
+  const mention = bodyCaptured.comment.find((b: any) => b.type === "tag");
+  assert.ok(mention, `expected a tag fragment, got: ${JSON.stringify(bodyCaptured.comment)}`);
+  assert.deepEqual(mention.user, { id: 4528224 });
+  assert.equal(mention.text, "@Amar OUALI");
+
+  // The tool descriptions tell the model the syntax and where to get the id
+  for (const name of ["addComment", "editComment"]) {
+    assert.ok(descriptions[name].includes("[@Name](#user_mention#<user_id>)"), `${name} must document the mention syntax`);
+    assert.ok(descriptions[name].includes("findMemberByName"), `${name} must point to findMemberByName`);
+  }
+
+  await mockAgent.close();
+  t.mock.timers.runAll();
+  t.mock.timers.reset();
+});
